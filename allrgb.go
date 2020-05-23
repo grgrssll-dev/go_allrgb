@@ -38,6 +38,7 @@ const (
     Center Alignment = 0
     End Alignment = 1
 )
+const totalColors int64 = 16777216
 
 var dbFileName = "allrgb.db"
 var backupDbFileName = "allrgb.db.backup"
@@ -49,7 +50,6 @@ var dbPath string
 var backupPath string
 var db *sql.DB
 var p *message.Printer
-var totalColors int64 = 16777216
 var cleanDB bool = false
 var align Alignment
 var aspectRatio Aspect
@@ -82,13 +82,32 @@ var aspectRatios []Aspect = []Aspect {
 	Aspect{ Width: 16777216, Height: 1, Ratio: 16777216 }
 }
 
+// region utils
 func check(e error, msg string) {
     if e != nil {
         panic(msg)
     }
 }
 
+func exists(path string) bool {
+	 _, err := os.Stat(path)
+	 return !os.IsNotExist(err)
+}
+
+// endregion utils
+
 // region draw
+func drawImage() {
+	fmt.Println("Running <draw>…")
+	// helpful - https://www.devdungeon.com/content/working-images-go#reading_image_from_file
+
+	// TODO decode image (based on type)
+	// get rects dims for finding aspectRatio
+	// resize and align envelope
+	// convert pixels
+	// write file!
+	// party time
+}
 
 func findAspectRatio(width int64, height int64) {
 	imageAR := width / height
@@ -131,25 +150,25 @@ func prepDBFilesystem() {
 	dbPath = path.Join(storagePath, dbFileName)
 	backupPath = path.Join(storagePath, backupDbFileName)
 	// check folder exists
-	if _, existErr := os.Stat(storagePath); os.IsNotExist(existErr) {
+	if !exists(storagePath) {
 		fmt.Println("Creating storage dir:", storagePath)
 		mkdirErr := os.Mkdir(".allrgb", 0755)
 		check(mkdirErr, "Cannot create storage dir")
 	}
 	// check db file exists
 	if cleanDB {
-		if _, dbExistErr := os.Stat(dbPath); !os.IsNotExist(dbExistErr) {
+		if exists(dbPath) {
 			fmt.Println("Deleting DB file…")
 			dbRmErr := os.Remove(dbPath)
 			check(dbRmErr, "Error removing DB")
 		}
-		if _, backupExistErr := os.Stat(backupPath); !os.IsNotExist(backupExistErr) {
+		if exists(backupPath) {
 			fmt.Println("Deleting DB backup file…")
 			backupRmErr := os.Remove(backupPath)
 			check(backupRmErr, "Error removing DB Backup")
 		}
 	}
-	if _, dbExistErr := os.Stat(dbPath); os.IsNotExist(dbExistErr) {
+	if !exists(dbPath) {
 		fmt.Println("Creating db file:", dbPath)
 		_, touchErr := os.Create(dbPath)
 		check(touchErr, "Error creating db file")
@@ -292,10 +311,6 @@ func buildDB() {
 		}
 	}
 	fmt.Println("DB ready…")
-}
-
-func drawImage() {
-	fmt.Println("Running <draw>…")
 }
 // endregion db
 
