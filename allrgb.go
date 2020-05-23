@@ -41,10 +41,8 @@ const (
 
 var dbFileName = "allrgb.db"
 var backupDbFileName = "allrgb.db.backup"
-var srcFileName string
 var srcFile *os.File
-var outputFileName string
-var outputFile  *os.File
+var destFile  *os.File
 var dithering uint8 = 0
 var storagePath string
 var dbPath string
@@ -92,7 +90,7 @@ func check(e error, msg string) {
 
 // region draw
 
-func findAspectRatio (width int64, height int64) {
+func findAspectRatio(width int64, height int64) {
 	imageAR := width / height
 	distance := totalColors
 	for i, ar := range aspectRatios {
@@ -103,12 +101,17 @@ func findAspectRatio (width int64, height int64) {
 	}
 }
 
-func doesSrcImageExist() bool {
-	_, existErr := os.Stat(srcFileName)
-	return !os.IsNotExist(existErr)
+func readInFile(fileName string) {
+	inFile, err := os.Open(fileName)
+	check(err, "Error reading source file")
+	srcFile = inFile
 }
 
-func createOutputFile
+func createOutFile(fileName string) {
+	outFile, err := os.Create(fileName)
+	check(err, "Error creating output file")
+	destFile = outFile
+}
 
 // func createImage(width int, height int, background color.RGBA) *image.RGBA {
 //     rect := image.Rect(0, 0, width, height)
@@ -329,11 +332,8 @@ func main() {
 		if len(drawArgs) == 0 {
 			panic("Missing source file")
 		}
-		srcFileName = drawArgs[0]
-		if !doesSrcImageExist() {
-			panic("Cannot find file: " + srcFileName)
-		}
-		outputFileName = drawArgs[1]
+		readInFile(drawArgs[0])
+		createOutFile(drawArgs[1])
 		if len(drawArgs) > 2 {
 			ditherVal, ditherErr := strconv.ParseUint(drawArgs[2], 10, 8);
 			if ditherErr != nil || ditherVal > 3 {
