@@ -39,18 +39,19 @@ const (
     End Alignment = 1
 )
 const totalColors int64 = 16777216
+const dbFileName = "allrgb.db"
+const backupDbFileName = "allrgb.db.backup"
+const storageFolderName = ".allrgb"
 
-var dbFileName = "allrgb.db"
-var backupDbFileName = "allrgb.db.backup"
-var srcFile *os.File
-var destFile  *os.File
-var dithering uint8 = 0
 var storagePath string
 var dbPath string
+var srcFile *os.File
+var destFile  *os.File
+var cleanDB bool = false
 var backupPath string
 var db *sql.DB
 var p *message.Printer
-var cleanDB bool = false
+var dithering uint8 = 0
 var align Alignment
 var aspectRatio Aspect
 
@@ -94,6 +95,26 @@ func exists(path string) bool {
 	 return !os.IsNotExist(err)
 }
 
+func touch(path string) *os.File {
+	fmt.Println("Creating:", path)
+	file, err := os.Create(path)
+	check(err, "Error creating " + path)
+	return file
+}
+
+func open(path string) *os.File {
+	fmt.Println("Opening:", path)
+	file, err := os.Open(path)
+	check(err, "Error Opening " + path)
+	return file
+}
+
+func delete(path string) {
+	fmt.Println("Deleting :" + path)
+	err := os.Remove(path)
+	check(err, "Error deleting " + path)
+}
+
 // endregion utils
 
 // region draw
@@ -120,18 +141,6 @@ func findAspectRatio(width int64, height int64) {
 	}
 }
 
-func readInFile(fileName string) {
-	inFile, err := os.Open(fileName)
-	check(err, "Error reading source file")
-	srcFile = inFile
-}
-
-func createOutFile(fileName string) {
-	outFile, err := os.Create(fileName)
-	check(err, "Error creating output file")
-	destFile = outFile
-}
-
 // func createImage(width int, height int, background color.RGBA) *image.RGBA {
 //     rect := image.Rect(0, 0, width, height)
 //     img := image.NewRGBA(rect)
@@ -146,32 +155,26 @@ func prepDBFilesystem() {
 	homeFolder, err := homedir.Dir()
 	check(err, "Cannot detect homedir")
 	os.Chdir(homeFolder)
-	storagePath = path.Join(homeFolder, ".allrgb")
+	storagePath = path.Join(homeFolder, storageFolderName)
 	dbPath = path.Join(storagePath, dbFileName)
 	backupPath = path.Join(storagePath, backupDbFileName)
 	// check folder exists
 	if !exists(storagePath) {
 		fmt.Println("Creating storage dir:", storagePath)
-		mkdirErr := os.Mkdir(".allrgb", 0755)
+		mkdirErr := os.Mkdir(storageFolderName, 0755)
 		check(mkdirErr, "Cannot create storage dir")
 	}
 	// check db file exists
 	if cleanDB {
 		if exists(dbPath) {
-			fmt.Println("Deleting DB file…")
-			dbRmErr := os.Remove(dbPath)
-			check(dbRmErr, "Error removing DB")
+			delete(dbPath)
 		}
 		if exists(backupPath) {
-			fmt.Println("Deleting DB backup file…")
-			backupRmErr := os.Remove(backupPath)
-			check(backupRmErr, "Error removing DB Backup")
+			delete(backupPath)
 		}
 	}
 	if !exists(dbPath) {
-		fmt.Println("Creating db file:", dbPath)
-		_, touchErr := os.Create(dbPath)
-		check(touchErr, "Error creating db file")
+		_ := touch(dbPath)
 	}
 }
 
@@ -193,11 +196,9 @@ func createTable() {
 // TODO zip backup before save
 func createBackup() {
 	fmt.Println("Creating DB backup", backupPath, "…")
-	in, err := os.Open(dbPath)
-	check(err, "Error opening DB File")
+	in := open(dbPath);
 	defer in.Close()
-	out, err := os.Create(backupPath)
-    check(err, "Error creating DB Backup File")
+	out := touch(backupPath)
     defer out.Close()
     _, err = io.Copy(out, in)
     check(err, "Error copying DB File to Backup")
@@ -206,11 +207,9 @@ func createBackup() {
 // TODO unzip backup before copy
 func createDbFromBackup() {
 	fmt.Println("Creating DB from backup…")
-	in, err := os.Open(backupPath)
-	check(err, "Error opening DB Backup File")
+	in := open(backupPath);
 	defer in.Close()
-	out, err := os.Create(dbPath)
-    check(err, "Error creating DB File")
+	out := touch(dbPath)
     defer out.Close()
     _, err = io.Copy(out, in)
     check(err, "Error copying Backup File to DB")
@@ -287,18 +286,14 @@ func isTableFull() bool {
 	}
 }
 
-func doesBackupExist() bool {
-	_, existErr := os.Stat(backupPath)
-	return !os.IsNotExist(existErr)
-}
-
 func buildDB() {
 	fmt.Println("Running <db>…")
 	prepDBFilesystem()
 	db, _ = sql.Open("sqlite3", dbPath)
 	defer db.Close()
+	backupExists := exists(backupPath)
 	if !doesTableExist() {
-		if doesBackupExist() {
+		if backupExists {
 			createDbFromBackup()
 		} else {
 			createTable()
@@ -306,7 +301,7 @@ func buildDB() {
 	}
 	if !isTableFull() {
 		fillTable()
-		if !doesBackupExist() {
+		if !backupExists {
 			createBackup()
 		}
 	}
@@ -347,8 +342,8 @@ func main() {
 		if len(drawArgs) == 0 {
 			panic("Missing source file")
 		}
-		readInFile(drawArgs[0])
-		createOutFile(drawArgs[1])
+		srcFile = open(drawArgs[0])
+		destFile = touch(drawArgs[1])
 		if len(drawArgs) > 2 {
 			ditherVal, ditherErr := strconv.ParseUint(drawArgs[2], 10, 8);
 			if ditherErr != nil || ditherVal > 3 {
@@ -372,11 +367,10 @@ func main() {
 			}
 		}
 		drawImage()
-		os.Exit(0)
 	default:
 		printHelpMenu()
-		os.Exit(0)
 	}
+	os.Exit(0)
 }
 // endregion main
 
