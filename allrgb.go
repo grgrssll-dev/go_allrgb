@@ -1,6 +1,8 @@
 package main
 
 // TODO make sure delete db file when finished making image
+// TODO check srcImage and get aspect ratio
+// TODO make new image with right # of px in similar aspect ratio
 
 import (
 	"fmt"
@@ -23,18 +25,27 @@ import (
 	"github.com/mitchellh/go-homedir"
 )
 
-// func createImage(width int, height int, background color.RGBA) *image.RGBA {
-//     rect := image.Rect(0, 0, width, height)
-//     img := image.NewRGBA(rect)
-//     draw.Draw(img, img.Bounds(), &image.Uniform{background}, image.ZP, draw.Src)
-//     return img
-// }
+type Alignment int8
+
+type Aspect struct {
+	Width int32
+	Height int32
+	Ratio float64
+}
+
+const (
+	Start Alignment = -1
+    Center Alignment = 0
+    End Alignment = 1
+)
 
 var dbFileName = "allrgb.db"
 var backupDbFileName = "allrgb.db.backup"
-var srcFile string
-var outputFile string
-var dithering int8
+var srcFileName string
+var srcFile *os.File
+var outputFileName string
+var outputFile  *os.File
+var dithering uint8 = 0
 var storagePath string
 var dbPath string
 var backupPath string
@@ -42,6 +53,36 @@ var db *sql.DB
 var p *message.Printer
 var totalColors int64 = 16777216
 var cleanDB bool = false
+var align Alignment
+var aspectRatio Aspect
+
+var aspectRatios []Aspect = []Aspect {
+	Aspect{ Width: 1, Height: 16777216, Ratio: 0.000000059604644775390625 }
+	Aspect{ Width: 2, Height: 8388608, Ratio: 0.0000002384185791015625 }
+	Aspect{ Width: 4, Height: 4194304, Ratio: 0.00000095367431640625 }
+	Aspect{ Width: 8, Height: 2097152, Ratio: 0.000003814697265625 }
+	Aspect{ Width: 16, Height: 1048576, Ratio: 0.0000152587890625 }
+	Aspect{ Width: 32, Height: 524288, Ratio: 0.00006103515625 }
+	Aspect{ Width: 64, Height: 262144, Ratio: 0.000244140625 }
+	Aspect{ Width: 128, Height: 131072, Ratio: 0.0009765625 }
+	Aspect{ Width: 256, Height: 65536, Ratio: 0.00390625 }
+	Aspect{ Width: 512, Height: 32768, Ratio: 0.015625 }
+	Aspect{ Width: 1024, Height: 16384, Ratio: 0.0625 }
+	Aspect{ Width: 2048, Height: 8192, Ratio: 0.25 }
+	Aspect{ Width: 4096, Height: 4096, Ratio: 1 }
+	Aspect{ Width: 8192, Height: 2048, Ratio: 4 }
+	Aspect{ Width: 16384, Height: 1024, Ratio: 16 }
+	Aspect{ Width: 32768, Height: 512, Ratio: 64 }
+	Aspect{ Width: 65536, Height: 256, Ratio: 256 }
+	Aspect{ Width: 131072, Height: 128, Ratio: 1024 }
+	Aspect{ Width: 262144, Height: 64, Ratio: 4096 }
+	Aspect{ Width: 524288, Height: 32, Ratio: 16384 }
+	Aspect{ Width: 1048576, Height: 16, Ratio: 65536 }
+	Aspect{ Width: 2097152, Height: 8, Ratio: 262144 }
+	Aspect{ Width: 4194304, Height: 4, Ratio: 1048576 }
+	Aspect{ Width: 8388608, Height: 2, Ratio: 4194304 }
+	Aspect{ Width: 16777216, Height: 1, Ratio: 16777216 }
+}
 
 func check(e error, msg string) {
     if e != nil {
@@ -49,6 +90,36 @@ func check(e error, msg string) {
     }
 }
 
+// region draw
+
+func findAspectRatio (width int64, height int64) {
+	imageAR := width / height
+	distance := totalColors
+	for i, ar := range aspectRatios {
+		if (math.Abs(imageAR - ar.Ratio) < distance) {
+			distance = ar.Ratio
+			aspectRatio = ar
+		}
+	}
+}
+
+func doesSrcImageExist() bool {
+	_, existErr := os.Stat(srcFileName)
+	return !os.IsNotExist(existErr)
+}
+
+func createOutputFile
+
+// func createImage(width int, height int, background color.RGBA) *image.RGBA {
+//     rect := image.Rect(0, 0, width, height)
+//     img := image.NewRGBA(rect)
+//     draw.Draw(img, img.Bounds(), &image.Uniform{background}, image.ZP, draw.Src)
+//     return img
+// }
+
+// endregion draw
+
+// region db
 func prepDBFilesystem() {
 	homeFolder, err := homedir.Dir()
 	check(err, "Cannot detect homedir")
@@ -223,6 +294,7 @@ func buildDB() {
 func drawImage() {
 	fmt.Println("Running <draw>…")
 }
+// endregion db
 
 // region main
 func main() {
@@ -257,16 +329,32 @@ func main() {
 		if len(drawArgs) == 0 {
 			panic("Missing source file")
 		}
-		srcFile = drawArgs[0]
-		outputFile = drawArgs[1]
-		if len(drawArgs) == 3 {
+		srcFileName = drawArgs[0]
+		if !doesSrcImageExist() {
+			panic("Cannot find file: " + srcFileName)
+		}
+		outputFileName = drawArgs[1]
+		if len(drawArgs) > 2 {
 			ditherVal, ditherErr := strconv.ParseUint(drawArgs[2], 10, 8);
 			if ditherErr != nil || ditherVal > 3 {
 				panic("Invalid dither value")
 			}
-			dithering = int8(ditherVal)
-		} else {
-			dithering = 0
+			dithering = uint8(ditherVal)
+			align = Center
+			if len(drawArgs) > 3 {
+				alignVal, alignErr := strconv.ParseInt(drawArgs[3], 10, 8);
+				if alignErr != nil || alignVal > 1 || alignVal < -1 {
+					panic("Invalid align value")
+				}
+				switch (int8(alignVal)) {
+				case -1:
+					align = Start
+				case 0:
+					align = Center
+				case 1:
+					align = End
+				}
+			}
 		}
 		drawImage()
 		os.Exit(0)
