@@ -12,6 +12,7 @@ import (
 	// "image/draw"
 	// "image/png"
 	// "archive/zip"
+	"math"
 	"io"
 	"os"
 	"path"
@@ -56,31 +57,31 @@ var align Alignment
 var aspectRatio Aspect
 
 var aspectRatios []Aspect = []Aspect {
-	Aspect{ Width: 1, Height: 16777216, Ratio: 0.000000059604644775390625 }
-	Aspect{ Width: 2, Height: 8388608, Ratio: 0.0000002384185791015625 }
-	Aspect{ Width: 4, Height: 4194304, Ratio: 0.00000095367431640625 }
-	Aspect{ Width: 8, Height: 2097152, Ratio: 0.000003814697265625 }
-	Aspect{ Width: 16, Height: 1048576, Ratio: 0.0000152587890625 }
-	Aspect{ Width: 32, Height: 524288, Ratio: 0.00006103515625 }
-	Aspect{ Width: 64, Height: 262144, Ratio: 0.000244140625 }
-	Aspect{ Width: 128, Height: 131072, Ratio: 0.0009765625 }
-	Aspect{ Width: 256, Height: 65536, Ratio: 0.00390625 }
-	Aspect{ Width: 512, Height: 32768, Ratio: 0.015625 }
-	Aspect{ Width: 1024, Height: 16384, Ratio: 0.0625 }
-	Aspect{ Width: 2048, Height: 8192, Ratio: 0.25 }
-	Aspect{ Width: 4096, Height: 4096, Ratio: 1 }
-	Aspect{ Width: 8192, Height: 2048, Ratio: 4 }
-	Aspect{ Width: 16384, Height: 1024, Ratio: 16 }
-	Aspect{ Width: 32768, Height: 512, Ratio: 64 }
-	Aspect{ Width: 65536, Height: 256, Ratio: 256 }
-	Aspect{ Width: 131072, Height: 128, Ratio: 1024 }
-	Aspect{ Width: 262144, Height: 64, Ratio: 4096 }
-	Aspect{ Width: 524288, Height: 32, Ratio: 16384 }
-	Aspect{ Width: 1048576, Height: 16, Ratio: 65536 }
-	Aspect{ Width: 2097152, Height: 8, Ratio: 262144 }
-	Aspect{ Width: 4194304, Height: 4, Ratio: 1048576 }
-	Aspect{ Width: 8388608, Height: 2, Ratio: 4194304 }
-	Aspect{ Width: 16777216, Height: 1, Ratio: 16777216 }
+	Aspect{ Width: 1, Height: 16777216, Ratio: 0.000000059604644775390625 },
+	Aspect{ Width: 2, Height: 8388608, Ratio: 0.0000002384185791015625 },
+	Aspect{ Width: 4, Height: 4194304, Ratio: 0.00000095367431640625 },
+	Aspect{ Width: 8, Height: 2097152, Ratio: 0.000003814697265625 },
+	Aspect{ Width: 16, Height: 1048576, Ratio: 0.0000152587890625 },
+	Aspect{ Width: 32, Height: 524288, Ratio: 0.00006103515625 },
+	Aspect{ Width: 64, Height: 262144, Ratio: 0.000244140625 },
+	Aspect{ Width: 128, Height: 131072, Ratio: 0.0009765625 },
+	Aspect{ Width: 256, Height: 65536, Ratio: 0.00390625 },
+	Aspect{ Width: 512, Height: 32768, Ratio: 0.015625 },
+	Aspect{ Width: 1024, Height: 16384, Ratio: 0.0625 },
+	Aspect{ Width: 2048, Height: 8192, Ratio: 0.25 },
+	Aspect{ Width: 4096, Height: 4096, Ratio: 1 },
+	Aspect{ Width: 8192, Height: 2048, Ratio: 4 },
+	Aspect{ Width: 16384, Height: 1024, Ratio: 16 },
+	Aspect{ Width: 32768, Height: 512, Ratio: 64 },
+	Aspect{ Width: 65536, Height: 256, Ratio: 256 },
+	Aspect{ Width: 131072, Height: 128, Ratio: 1024 },
+	Aspect{ Width: 262144, Height: 64, Ratio: 4096 },
+	Aspect{ Width: 524288, Height: 32, Ratio: 16384 },
+	Aspect{ Width: 1048576, Height: 16, Ratio: 65536 },
+	Aspect{ Width: 2097152, Height: 8, Ratio: 262144 },
+	Aspect{ Width: 4194304, Height: 4, Ratio: 1048576 },
+	Aspect{ Width: 8388608, Height: 2, Ratio: 4194304 },
+	Aspect{ Width: 16777216, Height: 1, Ratio: 16777216 },
 }
 
 // region utils
@@ -131,9 +132,9 @@ func drawImage() {
 }
 
 func findAspectRatio(width int64, height int64) {
-	imageAR := width / height
-	distance := totalColors
-	for i, ar := range aspectRatios {
+	imageAR := float64(width) / float64(height)
+	distance := float64(totalColors)
+	for _, ar := range aspectRatios {
 		if (math.Abs(imageAR - ar.Ratio) < distance) {
 			distance = ar.Ratio
 			aspectRatio = ar
@@ -174,7 +175,7 @@ func prepDBFilesystem() {
 		}
 	}
 	if !exists(dbPath) {
-		_ := touch(dbPath)
+		_ = touch(dbPath)
 	}
 }
 
@@ -200,7 +201,7 @@ func createBackup() {
 	defer in.Close()
 	out := touch(backupPath)
     defer out.Close()
-    _, err = io.Copy(out, in)
+    _, err := io.Copy(out, in)
     check(err, "Error copying DB File to Backup")
 }
 
@@ -211,7 +212,7 @@ func createDbFromBackup() {
 	defer in.Close()
 	out := touch(dbPath)
     defer out.Close()
-    _, err = io.Copy(out, in)
+    _, err := io.Copy(out, in)
     check(err, "Error copying Backup File to DB")
 }
 
