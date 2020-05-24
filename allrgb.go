@@ -31,8 +31,8 @@ import (
 type Alignment int8
 
 type Aspect struct {
-	Width int32
-	Height int32
+	Width int
+	Height int
 	Ratio float64
 }
 
@@ -135,21 +135,48 @@ func drawImage(srcFile *os.File, destFile *os.File, dithering uint8, align Align
 	check(decodeErr, "Error decoding image")
 	srcWidth := srcImage.Bounds().Max.X
 	srcHeight := srcImage.Bounds().Max.Y
-	aspectRatio := findAspectRatio(int64(srcWidth), int64(srcHeight))
+	aspectRatio := findAspectRatio(srcWidth, srcHeight)
 	destWidth := aspectRatio.Width
 	destHeight := aspectRatio.Height
 	destImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
+	srcMaskedImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
 	srcImage = resize.Resize(destWidth, 0, srcImage, resize.Lanczos3)
 	srcWidth = srcImage.Bounds().Max.X
 	srcHeight = srcImage.Bounds().Max.Y
-	// get rects dims for finding aspectRatio
-	// resize and align envelope
-	// convert pixels
-	// write file!
-	// party time
+	var startPoint image.Point
+	if (srcWidth == srcHeight) {
+		// none
+		startPoint = image.Point(0, 0)
+	} else if srcWidth == destWidth {
+		// vertical offset
+		heightDiff = srcHeight - destHeight
+		switch align {
+		case Start:
+			startPoint = image.Point(0, 0)
+		case Center:
+			startPoint = image.Point(0, -1 * int(math.Round(heightDiff / 2)))
+		case End:
+			startPoint = image.Point(0, heightDiff)
+		}
+	} else {
+		// horizontal offset
+		widthDiff = srcWidth - destWidth
+		switch align {
+		case Start:
+			startPoint = image.Point(0, 0)
+		case Center:
+			startPoint = image.Point(-1 * int(math.Round(widthDiff / 2)), 0)
+		case End:
+			startPoint = image.Point(0, widthDiff)
+		}
+	}
+	draw.Draw(srcMaskedImage, src.Bounds(), srcImage, startPoint, draw.Src)
+
+	// TODO convert pixels
+	png.Encode(destFile, srcMaskedImage)
 }
 
-func findAspectRatio(width int64, height int64) Aspect {
+func findAspectRatio(width int, height int) Aspect {
 	var aspectRatio Aspect = nil
 	imageAR := float64(width) / float64(height)
 	distance := float64(totalColors)
