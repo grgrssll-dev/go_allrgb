@@ -5,41 +5,46 @@ package main
 // TODO make new image with right # of px in similar aspect ratio
 
 import (
-	"fmt"
 	"database/sql"
+	"fmt"
 	"image"
-	"image/color"
+	// "image/color"
 	"image/draw"
-	"image/png"
-	"image/jpg"
 	"image/gif"
+	"image/jpeg"
+	"image/png"
 	// "archive/zip"
-	"math"
-	"io"
-	"os"
-	"path"
-	"strings"
-	"strconv"
-	"time"
-   	"golang.org/x/text/language"
-	"golang.org/x/text/message"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/mitchellh/go-homedir"
 	"github.com/nfnt/resize"
-	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
+	"io"
+	"math"
+	"os"
+	"path"
+	"strconv"
+	"strings"
+	"time"
 )
 
+// Alignment for when src/dest don't match dimensions
 type Alignment int8
 
+// Aspect - describes dest image
 type Aspect struct {
-	Width int
+	Width  int
 	Height int
-	Ratio float64
+	Ratio  float64
 }
 
 const (
+	// Start alignment
 	Start Alignment = -1
-    Center Alignment = 0
-    End Alignment = 1
+	// Center alignment
+	Center Alignment = 0
+	// End alignment
+	End Alignment = 1
 )
 const totalColors int64 = 16777216
 const dbFileName = "allrgb.db"
@@ -51,150 +56,141 @@ var dbPath string
 var backupPath string
 var db *sql.DB
 var p *message.Printer
-
-var aspectRatios []Aspect = []Aspect {
-	Aspect{ Width: 1, Height: 16777216, Ratio: 0.000000059604644775390625 },
-	Aspect{ Width: 2, Height: 8388608, Ratio: 0.0000002384185791015625 },
-	Aspect{ Width: 4, Height: 4194304, Ratio: 0.00000095367431640625 },
-	Aspect{ Width: 8, Height: 2097152, Ratio: 0.000003814697265625 },
-	Aspect{ Width: 16, Height: 1048576, Ratio: 0.0000152587890625 },
-	Aspect{ Width: 32, Height: 524288, Ratio: 0.00006103515625 },
-	Aspect{ Width: 64, Height: 262144, Ratio: 0.000244140625 },
-	Aspect{ Width: 128, Height: 131072, Ratio: 0.0009765625 },
-	Aspect{ Width: 256, Height: 65536, Ratio: 0.00390625 },
-	Aspect{ Width: 512, Height: 32768, Ratio: 0.015625 },
-	Aspect{ Width: 1024, Height: 16384, Ratio: 0.0625 },
-	Aspect{ Width: 2048, Height: 8192, Ratio: 0.25 },
-	Aspect{ Width: 4096, Height: 4096, Ratio: 1 },
-	Aspect{ Width: 8192, Height: 2048, Ratio: 4 },
-	Aspect{ Width: 16384, Height: 1024, Ratio: 16 },
-	Aspect{ Width: 32768, Height: 512, Ratio: 64 },
-	Aspect{ Width: 65536, Height: 256, Ratio: 256 },
-	Aspect{ Width: 131072, Height: 128, Ratio: 1024 },
-	Aspect{ Width: 262144, Height: 64, Ratio: 4096 },
-	Aspect{ Width: 524288, Height: 32, Ratio: 16384 },
-	Aspect{ Width: 1048576, Height: 16, Ratio: 65536 },
-	Aspect{ Width: 2097152, Height: 8, Ratio: 262144 },
-	Aspect{ Width: 4194304, Height: 4, Ratio: 1048576 },
-	Aspect{ Width: 8388608, Height: 2, Ratio: 4194304 },
-	Aspect{ Width: 16777216, Height: 1, Ratio: 16777216 },
+var aspectRatios = []Aspect{
+	// Aspect{ Width: 1, Height: 16777216, Ratio: 0.000000059604644775390625 },
+	// Aspect{ Width: 2, Height: 8388608, Ratio: 0.0000002384185791015625 },
+	// Aspect{ Width: 4, Height: 4194304, Ratio: 0.00000095367431640625 },
+	// Aspect{ Width: 8, Height: 2097152, Ratio: 0.000003814697265625 },
+	// Aspect{ Width: 16, Height: 1048576, Ratio: 0.0000152587890625 },
+	// Aspect{ Width: 32, Height: 524288, Ratio: 0.00006103515625 },
+	// Aspect{ Width: 64, Height: 262144, Ratio: 0.000244140625 },
+	// Aspect{ Width: 128, Height: 131072, Ratio: 0.0009765625 },
+	// Aspect{ Width: 256, Height: 65536, Ratio: 0.00390625 },
+	// Aspect{ Width: 512, Height: 32768, Ratio: 0.015625 },
+	Aspect{Width: 1024, Height: 16384, Ratio: 0.0625},
+	Aspect{Width: 2048, Height: 8192, Ratio: 0.25},
+	Aspect{Width: 4096, Height: 4096, Ratio: 1},
+	Aspect{Width: 8192, Height: 2048, Ratio: 4},
+	Aspect{Width: 16384, Height: 1024, Ratio: 16},
+	// Aspect{ Width: 32768, Height: 512, Ratio: 64 },
+	// Aspect{ Width: 65536, Height: 256, Ratio: 256 },
+	// Aspect{ Width: 131072, Height: 128, Ratio: 1024 },
+	// Aspect{ Width: 262144, Height: 64, Ratio: 4096 },
+	// Aspect{ Width: 524288, Height: 32, Ratio: 16384 },
+	// Aspect{ Width: 1048576, Height: 16, Ratio: 65536 },
+	// Aspect{ Width: 2097152, Height: 8, Ratio: 262144 },
+	// Aspect{ Width: 4194304, Height: 4, Ratio: 1048576 },
+	// Aspect{ Width: 8388608, Height: 2, Ratio: 4194304 },
+	// Aspect{ Width: 16777216, Height: 1, Ratio: 16777216 },
 }
 
 // region utils
 func check(e error, msg string) {
-    if e != nil {
-        panic(msg)
-    }
+	if e != nil {
+		panic(msg)
+	}
 }
 
 func exists(path string) bool {
-	 _, err := os.Stat(path)
-	 return !os.IsNotExist(err)
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
 }
 
 func touch(path string) *os.File {
 	fmt.Println("Creating:", path)
 	file, err := os.Create(path)
-	check(err, "Error creating " + path)
+	check(err, "Error creating "+path)
 	return file
 }
 
 func open(path string) *os.File {
 	fmt.Println("Opening:", path)
 	file, err := os.Open(path)
-	check(err, "Error Opening " + path)
+	check(err, "Error Opening "+path)
 	return file
 }
 
 func delete(path string) {
 	fmt.Println("Deleting :" + path)
 	err := os.Remove(path)
-	check(err, "Error deleting " + path)
+	check(err, "Error deleting "+path)
 }
 
 // endregion utils
 
 // region draw
-func drawImage(srcFile *os.File, destFile *os.File, dithering uint8, align Alignment) {
+func drawImage(srcFile *os.File, destFile *os.File, blockSize uint8, align Alignment) {
 	fmt.Println("Running <draw>…")
-	// helpful - https://www.devdungeon.com/content/working-images-go#reading_image_from_file
-	var srcImage image.Image
-	var decodeErr Error
-	imageData, imageType, err := image.Decode(srcFile)
-	check(err, "Error reading image")
-	srcFile.Seek(0, 0)
-	switch imageType {
-	case "png":
-		srcImage, decodeErr = png.Decode(srcFile)
-	case "jpg":
-		srcImage, decodeErr = jpg.Decode(srcFile)
-	case "gif":
-		srcImage, decodeErr = gif.Decode(srcFile)
-	default:
-	}
-	check(decodeErr, "Error decoding image")
+	srcImage := decodeImage(srcFile)
 	srcWidth := srcImage.Bounds().Max.X
 	srcHeight := srcImage.Bounds().Max.Y
 	aspectRatio := findAspectRatio(srcWidth, srcHeight)
 	destWidth := aspectRatio.Width
 	destHeight := aspectRatio.Height
 	destImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
-	srcMaskedImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
-	srcImage = resize.Resize(destWidth, 0, srcImage, resize.Lanczos3)
-	srcWidth = srcImage.Bounds().Max.X
-	srcHeight = srcImage.Bounds().Max.Y
-	var startPoint image.Point
-	if (srcWidth == srcHeight) {
-		// none
-		startPoint = image.Point(0, 0)
-	} else if srcWidth == destWidth {
-		// vertical offset
-		heightDiff = srcHeight - destHeight
-		switch align {
-		case Start:
-			startPoint = image.Point(0, 0)
-		case Center:
-			startPoint = image.Point(0, -1 * int(math.Round(heightDiff / 2)))
-		case End:
-			startPoint = image.Point(0, heightDiff)
+	srcImage = image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
+	srcResizedImage := resize.Resize(uint(destWidth), 0, srcImage, resize.Lanczos3)
+	srcWidth = srcResizedImage.Bounds().Max.X
+	srcHeight = srcResizedImage.Bounds().Max.Y
+	startPoint := getStartingPoint(srcWidth, srcHeight, destWidth, destHeight, align)
+	draw.Draw(destImage, destImage.Bounds(), srcImage, startPoint, draw.Src)
+	convertImage(srcImage, destImage, blockSize)
+	png.Encode(destFile, srcImage)
+}
+
+func convertImage(srcImage image.Image, destImage *image.RGBA, blockSize uint8) {
+	// todo
+}
+
+func decodeImage(srcFile *os.File) image.Image {
+	var srcImage image.Image
+	_, imageType, err := image.Decode(srcFile)
+	check(err, "Error reading image")
+	srcFile.Seek(0, 0)
+	switch imageType {
+	case "png":
+		srcImage, err = png.Decode(srcFile)
+	case "jpg":
+		srcImage, err = jpeg.Decode(srcFile)
+	case "gif":
+		srcImage, err = gif.Decode(srcFile)
+	default:
+	}
+	check(err, "Error decoding image")
+	return srcImage
+}
+func getStartingPoint(srcWidth, srcHeight, destWidth, destHeight int, align Alignment) image.Point {
+	startPoint := image.Point{0, 0}
+	if srcHeight > destHeight {
+		heightDiff := srcHeight - destHeight
+		if align == Center {
+			startPoint = image.Point{0, -1 * int(math.Round(float64(heightDiff)/2))}
+		} else if align == End {
+			startPoint = image.Point{0, heightDiff}
 		}
-	} else {
-		// horizontal offset
-		widthDiff = srcWidth - destWidth
-		switch align {
-		case Start:
-			startPoint = image.Point(0, 0)
-		case Center:
-			startPoint = image.Point(-1 * int(math.Round(widthDiff / 2)), 0)
-		case End:
-			startPoint = image.Point(0, widthDiff)
+	} else if srcWidth > destWidth {
+		widthDiff := srcWidth - destWidth
+		if align == Center {
+			startPoint = image.Point{-1 * int(math.Round(float64(widthDiff)/2)), 0}
+		} else if align == End {
+			startPoint = image.Point{0, widthDiff}
 		}
 	}
-	draw.Draw(srcMaskedImage, src.Bounds(), srcImage, startPoint, draw.Src)
-
-	// TODO convert pixels
-	png.Encode(destFile, srcMaskedImage)
+	return startPoint
 }
 
 func findAspectRatio(width int, height int) Aspect {
-	var aspectRatio Aspect = nil
+	var aspectRatio Aspect
 	imageAR := float64(width) / float64(height)
 	distance := float64(totalColors)
 	for _, ar := range aspectRatios {
-		if (math.Abs(imageAR - ar.Ratio) < distance) {
+		if math.Abs(imageAR-ar.Ratio) < distance {
 			distance = ar.Ratio
 			aspectRatio = ar
 		}
 	}
 	return aspectRatio
 }
-
-// func createImage(width int, height int, background color.RGBA) *image.RGBA {
-//     rect := image.Rect(0, 0, width, height)
-//     img := image.NewRGBA(rect)
-//     draw.Draw(img, img.Bounds(), &image.Uniform{background}, image.ZP, draw.Src)
-//     return img
-// }
 
 // endregion draw
 
@@ -244,23 +240,23 @@ func createTable() {
 // TODO zip backup before save
 func createBackup() {
 	fmt.Println("Creating DB backup", backupPath, "…")
-	in := open(dbPath);
+	in := open(dbPath)
 	defer in.Close()
 	out := touch(backupPath)
-    defer out.Close()
-    _, err := io.Copy(out, in)
-    check(err, "Error copying DB File to Backup")
+	defer out.Close()
+	_, err := io.Copy(out, in)
+	check(err, "Error copying DB File to Backup")
 }
 
 // TODO unzip backup before copy
 func createDbFromBackup() {
 	fmt.Println("Creating DB from backup…")
-	in := open(backupPath);
+	in := open(backupPath)
 	defer in.Close()
 	out := touch(dbPath)
-    defer out.Close()
-    _, err := io.Copy(out, in)
-    check(err, "Error copying Backup File to DB")
+	defer out.Close()
+	_, err := io.Copy(out, in)
+	check(err, "Error copying Backup File to DB")
 }
 
 func fillTable() {
@@ -284,7 +280,7 @@ func fillTable() {
 		for green < 256 {
 			blue = 0
 			vals = make([]string, 0, 256)
-			valArgs = make([]interface{}, 0, 256 * 3)
+			valArgs = make([]interface{}, 0, 256*3)
 			for blue < 256 {
 				vals = append(vals, "(?, ?, ?)")
 				valArgs = append(valArgs, red)
@@ -292,7 +288,7 @@ func fillTable() {
 				valArgs = append(valArgs, blue)
 				blue++
 				total++
-				if total > 1 && total % 1000000 == 0 {
+				if total > 1 && total%1000000 == 0 {
 					dot = dot + "."
 					formattedTotal = fmt.Sprintf("%10v", p.Sprintf("%d", total))
 					fmt.Printf("%s colors made %s\n", formattedTotal, dot)
@@ -305,7 +301,7 @@ func fillTable() {
 		}
 		red++
 	}
-	fmt.Printf("%08d colors made in %d seconds\n", total, time.Now().Unix() - start)
+	fmt.Printf("%08d colors made in %d seconds\n", total, time.Now().Unix()-start)
 }
 
 func doesTableExist() bool {
@@ -355,19 +351,20 @@ func buildDB(cleanDB bool) {
 	}
 	fmt.Println("DB ready…")
 }
+
 // endregion db
 
 // region main
 func main() {
 	defer func() {
-        if r := recover(); r != nil {
+		if r := recover(); r != nil {
 			fmt.Println("│ Error:", r)
 			fmt.Println("╘═══════════════════════════════════════════════════════════════════════")
 			fmt.Println("Run `./allrgb help` for help menu")
 			fmt.Println("")
 			os.Exit(0)
-        }
-    }()
+		}
+	}()
 	p = message.NewPrinter(language.English)
 	args := os.Args[1:]
 	command := "help"
@@ -393,21 +390,20 @@ func main() {
 		}
 		srcFile := open(drawArgs[0])
 		destFile := touch(drawArgs[1] + ".part")
-		dithering := 0
+		blockSize := 0
 		align = Center
-
 		if len(drawArgs) > 2 {
-			ditherVal, ditherErr := strconv.ParseUint(drawArgs[2], 10, 8);
-			if ditherErr != nil || ditherVal > 3 {
-				panic("Invalid dither value")
+			blockSizeVal, blockSizeErr := strconv.ParseUint(drawArgs[2], 10, 8)
+			if blockSizeErr != nil || blockSizeVal > 3 {
+				panic("Invalid blockSize value")
 			}
-			dithering = uint8(ditherVal)
+			blockSize = uint8(blockSizeVal) + 1
 			if len(drawArgs) > 3 {
-				alignVal, alignErr := strconv.ParseInt(drawArgs[3], 10, 8);
+				alignVal, alignErr := strconv.ParseInt(drawArgs[3], 10, 8)
 				if alignErr != nil || alignVal > 1 || alignVal < -1 {
 					panic("Invalid align value")
 				}
-				switch (int8(alignVal)) {
+				switch int8(alignVal) {
 				case -1:
 					align = Start
 				case 0:
@@ -417,12 +413,13 @@ func main() {
 				}
 			}
 		}
-		drawImage(srcFile, destFile, dithering, align)
+		drawImage(srcFile, destFile, blockSize, align)
 	default:
 		printHelpMenu()
 	}
 	os.Exit(0)
 }
+
 // endregion main
 
 //region help
@@ -445,8 +442,12 @@ draw: draw image
     ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
     sourceFile: source file to draw image from
     outputFile: file name of output
-    dithering:  optional dithering setting (default 0);
-    align:  optional alignment if src file is unusual aspect ratio (default 0)
+	stepSize:  px to skip, allows better color allocation across entire image (default 0)
+	    valid values are (0, 1, 2, 3)
+    align:  optional alignment if dimensions dont match after resize (default 0)
+	   -1: align with start (left or top)
+		0: align in center
+		1: alight with end (right or bottom)
 
 Examples
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -455,4 +456,5 @@ Examples
 ./allrgb draw input/file.png output/file.png 3 0
 `)
 }
+
 //endregion help
