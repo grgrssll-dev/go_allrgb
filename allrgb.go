@@ -7,10 +7,12 @@ package main
 import (
 	"fmt"
 	"database/sql"
-	// "image"
-	// "image/color"
-	// "image/draw"
-	// "image/png"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
+	"image/jpg"
+	"image/gif"
 	// "archive/zip"
 	"math"
 	"io"
@@ -21,9 +23,9 @@ import (
 	"time"
    	"golang.org/x/text/language"
 	"golang.org/x/text/message"
-
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/mitchellh/go-homedir"
+	"github.com/nfnt/resize"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type Alignment int8
@@ -46,15 +48,9 @@ const storageFolderName = ".allrgb"
 
 var storagePath string
 var dbPath string
-var srcFile *os.File
-var destFile  *os.File
-var cleanDB bool = false
 var backupPath string
 var db *sql.DB
 var p *message.Printer
-var dithering uint8 = 0
-var align Alignment
-var aspectRatio Aspect
 
 var aspectRatios []Aspect = []Aspect {
 	Aspect{ Width: 1, Height: 16777216, Ratio: 0.000000059604644775390625 },
@@ -119,11 +115,33 @@ func delete(path string) {
 // endregion utils
 
 // region draw
-func drawImage() {
+func drawImage(srcFile *os.File, destFile *os.File, dithering uint8, align Alignment) {
 	fmt.Println("Running <draw>…")
 	// helpful - https://www.devdungeon.com/content/working-images-go#reading_image_from_file
-
-	// TODO decode image (based on type)
+	var srcImage image.Image
+	var decodeErr Error
+	imageData, imageType, err := image.Decode(srcFile)
+	check(err, "Error reading image")
+	srcFile.Seek(0, 0)
+	switch imageType {
+	case "png":
+		srcImage, decodeErr = png.Decode(srcFile)
+	case "jpg":
+		srcImage, decodeErr = jpg.Decode(srcFile)
+	case "gif":
+		srcImage, decodeErr = gif.Decode(srcFile)
+	default:
+	}
+	check(decodeErr, "Error decoding image")
+	srcWidth := srcImage.Bounds().Max.X
+	srcHeight := srcImage.Bounds().Max.Y
+	aspectRatio := findAspectRatio(int64(srcWidth), int64(srcHeight))
+	destWidth := aspectRatio.Width
+	destHeight := aspectRatio.Height
+	destImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
+	srcImage = resize.Resize(destWidth, 0, srcImage, resize.Lanczos3)
+	srcWidth = srcImage.Bounds().Max.X
+	srcHeight = srcImage.Bounds().Max.Y
 	// get rects dims for finding aspectRatio
 	// resize and align envelope
 	// convert pixels
@@ -131,7 +149,8 @@ func drawImage() {
 	// party time
 }
 
-func findAspectRatio(width int64, height int64) {
+func findAspectRatio(width int64, height int64) Aspect {
+	var aspectRatio Aspect = nil
 	imageAR := float64(width) / float64(height)
 	distance := float64(totalColors)
 	for _, ar := range aspectRatios {
@@ -140,6 +159,7 @@ func findAspectRatio(width int64, height int64) {
 			aspectRatio = ar
 		}
 	}
+	return aspectRatio
 }
 
 // func createImage(width int, height int, background color.RGBA) *image.RGBA {
@@ -152,7 +172,7 @@ func findAspectRatio(width int64, height int64) {
 // endregion draw
 
 // region db
-func prepDBFilesystem() {
+func prepDBFilesystem(cleanDB bool) {
 	homeFolder, err := homedir.Dir()
 	check(err, "Cannot detect homedir")
 	os.Chdir(homeFolder)
@@ -287,9 +307,9 @@ func isTableFull() bool {
 	}
 }
 
-func buildDB() {
+func buildDB(cleanDB bool) {
 	fmt.Println("Running <db>…")
-	prepDBFilesystem()
+	prepDBFilesystem(cleanDB)
 	db, _ = sql.Open("sqlite3", dbPath)
 	defer db.Close()
 	backupExists := exists(backupPath)
@@ -330,10 +350,11 @@ func main() {
 	switch command {
 	case "db":
 		dbArgs := args[1:]
+		cleanDB := false
 		if len(dbArgs) == 1 && dbArgs[0] == "clean" {
 			cleanDB = true
 		}
-		buildDB()
+		buildDB(cleanDB)
 		os.Exit(0)
 	case "draw":
 		drawArgs := args[1:]
@@ -343,15 +364,17 @@ func main() {
 		if len(drawArgs) == 0 {
 			panic("Missing source file")
 		}
-		srcFile = open(drawArgs[0])
-		destFile = touch(drawArgs[1])
+		srcFile := open(drawArgs[0])
+		destFile := touch(drawArgs[1] + ".part")
+		dithering := 0
+		align = Center
+
 		if len(drawArgs) > 2 {
 			ditherVal, ditherErr := strconv.ParseUint(drawArgs[2], 10, 8);
 			if ditherErr != nil || ditherVal > 3 {
 				panic("Invalid dither value")
 			}
 			dithering = uint8(ditherVal)
-			align = Center
 			if len(drawArgs) > 3 {
 				alignVal, alignErr := strconv.ParseInt(drawArgs[3], 10, 8);
 				if alignErr != nil || alignVal > 1 || alignVal < -1 {
@@ -367,7 +390,7 @@ func main() {
 				}
 			}
 		}
-		drawImage()
+		drawImage(srcFile, destFile, dithering, align)
 	default:
 		printHelpMenu()
 	}
@@ -396,12 +419,13 @@ draw: draw image
     sourceFile: source file to draw image from
     outputFile: file name of output
     dithering:  optional dithering setting (default 0);
+    align:  optional alignment if src file is unusual aspect ratio (default 0)
 
 Examples
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ./allrgb help
 ./allrgb db ~/.mydb
-./allrgb draw input/file.png output/file.png 3
+./allrgb draw input/file.png output/file.png 3 0
 `)
 }
 //endregion help
