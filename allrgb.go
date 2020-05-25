@@ -72,11 +72,17 @@ var aspectRatios = []Aspect{
 	Aspect{Width: 8192, Height: 2048, Ratio: 4},
 	Aspect{Width: 16384, Height: 1024, Ratio: 16},
 }
-var offsets = [][]int{
+var xOffsets = [][]int{
 	[]int{0},
-	[]int{0, 2, 3, 1},
-	[]int{0, 7, 2, 8, 4, 6, 3, 5, 1},
-	[]int{0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5},
+	[]int{0, 1, 1, 0},
+	[]int{0, 2, 2, 0, 1, 1, 2, 1, 0},
+	[]int{0, 2, 2, 0, 1, 3, 3, 1, 1, 3, 3, 1, 0, 2, 2, 0},
+}
+var yOffsets = [][]int{
+	[]int{0},
+	[]int{0, 1, 0, 1},
+	[]int{0, 2, 0, 2, 1, 2, 1, 0, 1},
+	[]int{0, 2, 0, 2, 1, 3, 1, 3, 0, 2, 0, 2, 1, 3, 1, 3},
 }
 
 // region utils
@@ -160,7 +166,8 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, blockSize int, a
 	check(err, "Error saving to file")
 }
 
-func convertImage(db *sql.DB, srcImage image.Image, destImage *image.RGBA, blockSize int) {
+func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, blockSize int) {
+	var passOff int
 	now := time.Now()
 	start := now.Unix()
 	width := destImage.Bounds().Max.X
@@ -172,10 +179,12 @@ func convertImage(db *sql.DB, srcImage image.Image, destImage *image.RGBA, block
 	x := 0
 	y := 0
 	for pass < passCount {
-		xOffset = offsets[blockSize-1][pass%blockSize]
-		yOffset = offsets[blockSize-1][int(math.Floor(float64(pass)/float64(blockSize)))]
+		passOff = pass % blockSize
+		xOffset = xOffsets[blockSize-1][passOff]
+		yOffset = yOffsets[blockSize-1][passOff]
 		y = yOffset
 		x = xOffset
+		fmt.Println("xo:", x, "yo:", y)
 		for y < height {
 			for x < width {
 				setColor(db, srcImage, destImage, x, y)
@@ -184,31 +193,40 @@ func convertImage(db *sql.DB, srcImage image.Image, destImage *image.RGBA, block
 			y = y + blockSize
 		}
 		fmt.Printf("**** Pass %d of %d completed (time elapsed: %d) ****\n",
-			pass, passCount, time.Now().Unix()-start)
+			pass+1, passCount, time.Now().Unix()-start)
 		pass++
 	}
 	fmt.Println("Finished converting image, duration:", time.Now().Unix()-start)
 }
 
-func setColor(db *sql.DB, srcImage image.Image, destImage *image.RGBA, x int, y int) {
-	srcColor := srcImage.At(x, y)
-	destColor := matchColor(db, srcColor)
-	destImage.Set(x, y, destColor)
+func setColor(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, x int, y int) {
+	srcColor := srcImage.RGBAAt(x, y)
+	destColor := matchColor(db, srcColor, x%2)
+	destImage.SetRGBA(x, y, destColor)
+	fmt.Println("x:", x, "y:", y)
 }
 
-func matchColor(db *sql.DB, srcColor color.Color) color.Color {
+func matchColor(db *sql.DB, srcColor color.RGBA, tick int) color.RGBA {
 	var matched ColorRow
+	c1 := "<"
+	c2 := "<"
+	comp1 := c1
+	comp2 := c2
+	if tick == 1 {
+		comp1 = c2
+		comp2 = c1
+	}
 	lum := getLum(srcColor)
-	row1 := fetchRow(db, lum, "<=")
-	row2 := fetchRow(db, lum, ">")
-	if !row1.Found {
-		matched = row2
-	} else if !row2.Found {
-		matched = row1
-	} else if row1.Dist <= row2.Dist {
-		matched = row1
+	row := fetchRow(db, lum, "=")
+	if row.Found {
+		matched = row
 	} else {
-		matched = row2
+		row1 := fetchRow(db, lum, comp1)
+		if row1.Found {
+			matched = row1
+		} else {
+			matched = fetchRow(db, lum, comp2)
+		}
 	}
 	statement, _ := db.Prepare("DELETE FROM colors WHERE r = ? AND g = ? AND b = ?")
 	statement.Exec(matched.R, matched.G, matched.B)
@@ -220,11 +238,14 @@ func matchColor(db *sql.DB, srcColor color.Color) color.Color {
 
 func fetchRow(db *sql.DB, lum int, comparison string) ColorRow {
 	var colorRow ColorRow
-	row := db.QueryRow(fmt.Sprintf(`SELECT ABS(lum - %d) AS distance, r, g, b
-FROM colors
-WHERE lum %s %d
-ORDER BY distance ASC
-LIMIT 1`, lum, comparison, lum))
+	var row *sql.Row
+	if comparison == "=" {
+		row = db.QueryRow(fmt.Sprintf(`SELECT '0' AS distance, r, g, b
+FROM colors WHERE lum %s %d ORDER BY distance ASC LIMIT 1`, comparison, lum))
+	} else {
+		row = db.QueryRow(fmt.Sprintf(`SELECT ABS(lum - %d) AS distance, r, g, b
+FROM colors WHERE lum %s %d ORDER BY distance ASC LIMIT 1`, lum, comparison, lum))
+	}
 	switch err := row.Scan(&colorRow.Dist, &colorRow.R, &colorRow.G, &colorRow.B); err {
 	case sql.ErrNoRows:
 		return ColorRow{Found: false, Dist: 0, R: 0, G: 0, B: 0}
@@ -236,7 +257,7 @@ LIMIT 1`, lum, comparison, lum))
 	}
 }
 
-func getLum(c color.Color) int {
+func getLum(c color.RGBA) int {
 	r, g, b, _ := c.RGBA()
 	red := float64(r >> 8)
 	green := float64(g >> 8)
