@@ -1,9 +1,14 @@
 # go allrgb generator
-Generates an ALLRGB image ([read about them and see some other people's examples here](https://allrgb.com/)) by taking a source image and converting the pixels to use every RGB color combo (16,777,216 colors) once and only once. It does this in a kinda dumb way of storing every combination of RGB in a sqlite db and matching the source pixel by luminosity.
+Generates an ALLRGB image by taking a source image and converting the pixels to use every RGB color combo (16,777,216 colors) once and only once. It does this in a kinda dumb way of storing every combination of RGB in a sqlite db and matching the source pixel by luminosity.
+
+[Read about them and see some other people's examples here](https://allrgb.com/)
+*NOTE none of the images on the linked site were generated with this software... yet? (as of 2020-05-25) but I plan on submitting one*
 
 It's not a fast process.
 
 Why? bc I wanted to play with golang and rewriting an [old php script](https://github.com/grgrssll/allrgb-image-converter) seemed like a fun project. I'm sure there are way better ways of doing this, but I don't know them...
+
+**NOTE** db stored in `~/.allrgb/allrgb.db` (and a backup `allrgb.db.backup` for quick regeneration) size are ~700mb each so remove the backup after if want space back (zipping backup is on my todo list)
 
 ## Usage
 
@@ -13,8 +18,6 @@ Why? bc I wanted to play with golang and rewriting an [old php script](https://g
 `db` prepare database
 
 `draw` draw image (will prepare db if needed)
-
-NOTE: db stored in `~/.allrgb/allrgb.db` (and a backup `allrgb.db.backup` for quick regeneration) size is ~700mb so remove after if want space back (zipping backup is on my todo list)
 
 #### \<db> arguments
 * `force` force regeneration of db (leave off if you don't want to force db regeneration)
@@ -33,10 +36,10 @@ NOTE: db stored in `~/.allrgb/allrgb.db` (and a backup `allrgb.db.backup` for qu
 $`go build allrgb.go`
 
 ### Examples
-`./allrgb help`
+$`./allrgb help`
 
-`./allrgb db` # builds db if needed
+$`./allrgb db` # builds db if needed
 
-`./allrgb db force` # force rebuilds db
+$`./allrgb db force` # force rebuilds db
 
-`./allrgb draw input/file.png output/file.png 3 0` # draw will rebuild db if needed
+$`./allrgb draw input/file.png output/file.png 3 0` # draw will rebuild db if needed
