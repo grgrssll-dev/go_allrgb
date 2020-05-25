@@ -161,6 +161,8 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, blockSize int, a
 }
 
 func convertImage(db *sql.DB, srcImage image.Image, destImage *image.RGBA, blockSize int) {
+	now := time.Now()
+	start := now.Unix()
 	width := destImage.Bounds().Max.X
 	height := destImage.Bounds().Max.Y
 	passCount := int(blockSize * blockSize)
@@ -181,9 +183,11 @@ func convertImage(db *sql.DB, srcImage image.Image, destImage *image.RGBA, block
 			}
 			y = y + blockSize
 		}
-		fmt.Println("Pass", pass, "of", passCount, "completed")
+		fmt.Printf("**** Pass %d of %d completed (time elapsed: %d) ****\n",
+			pass, passCount, time.Now().Unix()-start)
 		pass++
 	}
+	fmt.Println("Finished converting image, duration:", time.Now().Unix()-start)
 }
 
 func setColor(db *sql.DB, srcImage image.Image, destImage *image.RGBA, x int, y int) {
@@ -210,7 +214,7 @@ func matchColor(db *sql.DB, srcColor color.Color) color.Color {
 	statement.Exec(matched.R, matched.G, matched.B)
 	defer statement.Close()
 	newColor := color.RGBA{matched.R, matched.G, matched.B, 255}
-	fmt.Println("--SrcColor", srcColor, "\n--lum:", lum, "\n--NewColor", newColor)
+	fmt.Println("--SrcColor", srcColor, "\n--NewColor", newColor, "\n--Dist", matched.Dist, "-", lum)
 	return newColor
 }
 
