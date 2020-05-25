@@ -228,7 +228,6 @@ FROM colors
 WHERE %s
 ORDER BY distance ASC
 LIMIT 1`, lum, fmt.Sprintf("lum %s= %d", direction, lum))
-	fmt.Println("Query\n", query, "\n")
 	row := db.QueryRow(query)
 	switch err := row.Scan(&id, &distance, &r, &g, &b); err {
 	case sql.ErrNoRows:
@@ -411,6 +410,7 @@ func fillTable() {
 			}
 			insertStmt := fmt.Sprintf("INSERT INTO colors (r, g, b) VALUES %s", strings.Join(vals, ","))
 			_, err := db.Exec(insertStmt, valArgs...)
+			defer insertStmt.Close()
 			check(err, "Error inserting into db")
 			green++
 		}
@@ -453,14 +453,18 @@ func buildDB(cleanDB bool) {
 	backupExists := exists(backupPath)
 	if !doesTableExist() {
 		if backupExists {
+			fmt.Println("DB from backup")
 			createDbFromBackup()
 		} else {
+			fmt.Println("DB from scratch")
 			createTable()
 		}
 	}
 	if !isTableFull() {
+		fmt.Println("DB fill")
 		fillTable()
 		if !backupExists {
+			fmt.Println("DB to backup")
 			createBackup()
 		}
 	}
