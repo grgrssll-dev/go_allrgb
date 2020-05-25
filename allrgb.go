@@ -39,11 +39,11 @@ type Aspect struct {
 
 // ColorRow from db
 type ColorRow struct {
-	ID   int
-	Dist uint8
-	R    uint8
-	G    uint8
-	B    uint8
+	Found bool
+	Dist  uint8
+	R     uint8
+	G     uint8
+	B     uint8
 }
 
 const (
@@ -115,7 +115,7 @@ func delete(path string) {
 // endregion utils
 
 // region draw
-func drawImage(srcFile *os.File, destFile *os.File, blockSize int, align Alignment) {
+func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, blockSize int, align Alignment) {
 	fmt.Println("Running <draw>…")
 	srcImage := decodeImage(srcFile)
 	fmt.Println("Decoded", srcImage.Bounds())
@@ -136,12 +136,12 @@ func drawImage(srcFile *os.File, destFile *os.File, blockSize int, align Alignme
 	startPoint := getStartingPoint(srcWidth, srcHeight, destWidth, destHeight, align)
 	draw.Draw(sImage, destImage.Bounds(), srcResizedImage, startPoint, draw.Src)
 
-	// debugFileName, _ := homedir.Expand("~/Desktop/Debug.png")
-	// fmt.Println("-- Saving debug File", debugFileName)
-	// debugFile := touch(debugFileName)
-	// debugFile.Seek(0, 0)
-	// png.Encode(debugFile, srcResizedImage)
-	// debugFile.Close()
+	debugFileName, _ := homedir.Expand("~/Desktop/Debug.png")
+	fmt.Println("-- Saving debug File", debugFileName)
+	debugFile := touch(debugFileName)
+	debugFile.Seek(0, 0)
+	png.Encode(debugFile, srcResizedImage)
+	debugFile.Close()
 
 	fmt.Println("ready to convert")
 	convertImage(db, srcImage, destImage, int(blockSize))
@@ -189,9 +189,9 @@ func matchColor(db *sql.DB, srcColor color.Color) color.Color {
 	row1 := fetchRow(db, lum, "<=")
 	row2 := fetchRow(db, lum, ">")
 	fmt.Println("Color", srcColor, "lum:", lum, "\n", row1, "\n", row2)
-	if row1.ID == -1 {
+	if !row1.Found {
 		matched = row2
-	} else if row2.ID == -1 {
+	} else if !row2.Found {
 		matched = row1
 	} else if row1.Dist <= row2.Dist {
 		matched = row1
@@ -203,27 +203,25 @@ func matchColor(db *sql.DB, srcColor color.Color) color.Color {
 	defer statement.Close()
 	newColor := color.RGBA{matched.R, matched.G, matched.B, 255}
 	fmt.Println("New Color", newColor)
-	fmt.Println("Deleted ID", matched.R, matched.G, matched.B)
+	fmt.Println("Deleted", matched.R, matched.G, matched.B)
 	return newColor
 }
 
-func fetchRow(db *sql.DB, lum int, direction string) ColorRow {
+func fetchRow(db *sql.DB, lum int, comparison string) ColorRow {
 	var colorRow ColorRow
-	query := fmt.Sprintf(`SELECT ABS(lum - %d) AS distance, r, g, b
+	row := db.QueryRow(fmt.Sprintf(`SELECT ABS(lum - %d) AS distance, r, g, b
 FROM colors
-WHERE %s
+WHERE lum %s %d
 ORDER BY distance ASC
-LIMIT 1`, lum, fmt.Sprintf("lum %s %d", direction, lum))
-	row := db.QueryRow(query)
-	fmt.Println("Row", row, "|", query)
-	colorRow.ID = -1
+LIMIT 1`, lum, comparison, lum))
+	fmt.Println("-- Row", lum, "|", row)
 	switch err := row.Scan(&colorRow.Dist, &colorRow.R, &colorRow.G, &colorRow.B); err {
 	case sql.ErrNoRows:
-		return ColorRow{ID: -1, Dist: 0, R: 0, G: 0, B: 0}
+		return ColorRow{Found: false, Dist: 0, R: 0, G: 0, B: 0}
 	case nil:
+		colorRow.Found = true
 		return colorRow
 	default:
-		fmt.Println("--ERROR", err)
 		panic(err)
 	}
 }
@@ -521,7 +519,7 @@ func main() {
 			}
 		}
 		buildDB(false)
-		drawImage(srcFile, destFile, blockSize, align)
+		drawImage(db, srcFile, destFile, blockSize, align)
 		defer db.Close()
 	default:
 		printHelpMenu()
