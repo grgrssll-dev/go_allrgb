@@ -116,35 +116,43 @@ func delete(path string) {
 
 // region draw
 func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, blockSize int, align Alignment) {
+	var srcResizedImage image.Image
+	var newHeight int
+	var newWidth int
 	fmt.Println("Running <draw>…")
 	srcImage := decodeImage(srcFile)
-	fmt.Println("Decoded", srcImage.Bounds())
 	srcWidth := srcImage.Bounds().Max.X
 	srcHeight := srcImage.Bounds().Max.Y
 	aspectRatio := findAspectRatio(srcWidth, srcHeight)
 	destWidth := aspectRatio.Width
 	destHeight := aspectRatio.Height
-	fmt.Println("Creating images", aspectRatio)
 	destImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
 	sImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
 	fmt.Println("Ready to resize", srcWidth, srcHeight, "->", aspectRatio)
-	newHeight := math.Ceil(float64(destWidth) * float64(srcHeight) / float64(srcWidth))
-	srcResizedImage := resize.Resize(uint(destWidth), uint(newHeight), srcImage, resize.Lanczos3)
+	if srcWidth > srcHeight {
+		newWidth = destWidth
+		newHeight = int(math.Ceil(float64(destWidth) * float64(srcHeight) / float64(srcWidth)))
+	} else {
+		newHeight = destHeight
+		newWidth = int(math.Ceil(float64(srcWidth) * float64(destHeight) / float64(srcHeight)))
+	}
+	srcResizedImage = resize.Resize(uint(newWidth), uint(newHeight), srcImage, resize.Lanczos3)
 	fmt.Println("Resized", srcResizedImage.Bounds())
 	srcWidth = srcResizedImage.Bounds().Max.X
 	srcHeight = srcResizedImage.Bounds().Max.Y
 	startPoint := getStartingPoint(srcWidth, srcHeight, destWidth, destHeight, align)
-	draw.Draw(sImage, destImage.Bounds(), srcResizedImage, startPoint, draw.Src)
+	sRect := image.Rect(startPoint.X, startPoint.Y, startPoint.X+newWidth, startPoint.Y+newHeight)
+	draw.Draw(sImage, sRect, srcResizedImage, image.ZP, draw.Src)
 
-	debugFileName, _ := homedir.Expand("~/Desktop/Debug.png")
-	fmt.Println("-- Saving debug File", debugFileName)
-	debugFile := touch(debugFileName)
-	debugFile.Seek(0, 0)
-	png.Encode(debugFile, srcResizedImage)
-	debugFile.Close()
+	// debugFileName, _ := homedir.Expand("~/Desktop/Debug.png")
+	// fmt.Println("-- Saving debug File", debugFileName)
+	// debugFile := touch(debugFileName)
+	// debugFile.Seek(0, 0)
+	// png.Encode(debugFile, sImage)
+	// debugFile.Close()
 
 	fmt.Println("ready to convert")
-	convertImage(db, srcImage, destImage, int(blockSize))
+	convertImage(db, sImage, destImage, int(blockSize))
 	fmt.Println("encoding")
 	png.Encode(destFile, destImage)
 	destFile.Close()
@@ -173,6 +181,7 @@ func convertImage(db *sql.DB, srcImage image.Image, destImage *image.RGBA, block
 			}
 			y = y + blockSize
 		}
+		fmt.Println("Pass", pass, "of", passCount, "completed")
 		pass++
 	}
 }
@@ -188,7 +197,6 @@ func matchColor(db *sql.DB, srcColor color.Color) color.Color {
 	lum := getLum(srcColor)
 	row1 := fetchRow(db, lum, "<=")
 	row2 := fetchRow(db, lum, ">")
-	fmt.Println("Color", srcColor, "lum:", lum, "\n", row1, "\n", row2)
 	if !row1.Found {
 		matched = row2
 	} else if !row2.Found {
@@ -202,8 +210,7 @@ func matchColor(db *sql.DB, srcColor color.Color) color.Color {
 	statement.Exec(matched.R, matched.G, matched.B)
 	defer statement.Close()
 	newColor := color.RGBA{matched.R, matched.G, matched.B, 255}
-	fmt.Println("New Color", newColor)
-	fmt.Println("Deleted", matched.R, matched.G, matched.B)
+	fmt.Println("--SrcColor", srcColor, "\n--lum:", lum, "\n--NewColor", newColor)
 	return newColor
 }
 
@@ -214,7 +221,6 @@ FROM colors
 WHERE lum %s %d
 ORDER BY distance ASC
 LIMIT 1`, lum, comparison, lum))
-	fmt.Println("-- Row", lum, "|", row)
 	switch err := row.Scan(&colorRow.Dist, &colorRow.R, &colorRow.G, &colorRow.B); err {
 	case sql.ErrNoRows:
 		return ColorRow{Found: false, Dist: 0, R: 0, G: 0, B: 0}
@@ -232,7 +238,7 @@ func getLum(c color.Color) int {
 	green := float64(g >> 8)
 	blue := float64(b >> 8)
 	lum := int(math.Round((red * 0.3) + (green * 0.59) + (blue * 0.11)))
-	fmt.Println("Calculate lum", "r: ", red, "g: ", green, "b: ", blue, "lum: ", lum)
+	// fmt.Println("Calculate lum", "r: ", red, "g: ", green, "b: ", blue, "lum: ", lum)
 	return lum
 }
 
@@ -259,8 +265,8 @@ func decodeImage(srcFile *os.File) image.Image {
 }
 
 func getStartingPoint(srcWidth, srcHeight, destWidth, destHeight int, align Alignment) image.Point {
-	fmt.Println("srcWidth:", srcWidth, "srcHeight:", srcHeight)
-	fmt.Println("destWidth:", destWidth, "destHeight:", destHeight)
+	// fmt.Println("srcWidth:", srcWidth, "srcHeight:", srcHeight)
+	// fmt.Println("destWidth:", destWidth, "destHeight:", destHeight)
 	startPoint := image.Point{0, 0}
 	if srcHeight > destHeight {
 		heightDiff := srcHeight - destHeight
@@ -331,11 +337,11 @@ func createTable() {
 	statement1, _ := db.Prepare("DROP TABLE IF EXISTS colors")
 	statement1.Exec()
 	statement2, _ := db.Prepare(`CREATE TABLE colors(
-	id UNSIGNED INTEGER PRIMARY KEY,
 	r UNSIGNED TINYINT NOT NULL,
 	g UNSIGNED TINYINT NOT NULL,
 	b UNSIGNED TINYINT NOT NULL,
-	lum UNSIGED TINYINT GENERATED ALWAYS AS (ROUND((r * 0.3) + (g * 0.59) + (b * 0.11), 0)) STORED
+	lum UNSIGED TINYINT GENERATED ALWAYS AS (ROUND((r * 0.3) + (g * 0.59) + (b * 0.11), 0)) STORED,
+	PRIMARY KEY(r, g, b)
 )`)
 	statement2.Exec()
 	statement3, _ := db.Prepare("CREATE INDEX color_lum ON colors(lum)")
@@ -447,8 +453,10 @@ func buildDB(cleanDB bool) {
 		}
 	}
 	if !isTableFull() {
-		fillTable()
-		if !backupExists {
+		if backupExists {
+			createDbFromBackup()
+		} else {
+			fillTable()
 			createBackup()
 		}
 	}
