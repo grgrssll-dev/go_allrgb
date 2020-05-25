@@ -121,7 +121,7 @@ func delete(path string) {
 // endregion utils
 
 // region draw
-func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, blockSize int, align Alignment) {
+func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, gridSize int, align Alignment) {
 	var srcResizedImage image.Image
 	var newHeight int
 	var newWidth int
@@ -158,7 +158,7 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, blockSize int, a
 	// debugFile.Close()
 
 	fmt.Println("ready to convert")
-	convertImage(db, sImage, destImage, int(blockSize))
+	convertImage(db, sImage, destImage, int(gridSize))
 	fmt.Println("encoding")
 	png.Encode(destFile, destImage)
 	destFile.Close()
@@ -166,13 +166,13 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, blockSize int, a
 	check(err, "Error saving to file")
 }
 
-func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, blockSize int) {
+func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, gridSize int) {
 	now := time.Now()
 	start := now.Unix()
 	width := destImage.Bounds().Max.X
 	height := destImage.Bounds().Max.Y
 	fmt.Println("width:", width, "height:", height)
-	passCount := int(blockSize * blockSize)
+	passCount := int(gridSize * gridSize)
 	pass := 0
 	xOffset := 0
 	yOffset := 0
@@ -180,12 +180,12 @@ func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, block
 	y := 0
 	i := 1
 	for pass < passCount {
-		xOffset = xOffsets[blockSize-1][pass]
-		yOffset = yOffsets[blockSize-1][pass]
-		rows := int(math.Floor(float64(height-yOffset) / float64(blockSize)))
-		fmt.Println("xoff:", x, "yoff:", y, "blockSize:", blockSize, "pass:", pass)
-		for y = yOffset; y < height; y += blockSize {
-			for x = xOffset; x < width; x += blockSize {
+		xOffset = xOffsets[gridSize-1][pass]
+		yOffset = yOffsets[gridSize-1][pass]
+		rows := int(math.Floor(float64(height-yOffset) / float64(gridSize)))
+		fmt.Println("xoff:", x, "yoff:", y, "gridSize:", gridSize, "pass:", pass)
+		for y = yOffset; y < height; y += gridSize {
+			for x = xOffset; x < width; x += gridSize {
 				setColor(db, srcImage, destImage, x, y)
 			}
 			fmt.Printf("row %d of %d completed for this pass\n", i, rows)
@@ -523,14 +523,14 @@ func main() {
 		srcFile := open(drawArgs[0])
 		destFileName = drawArgs[1]
 		destFile := touch(drawArgs[1] + ".part")
-		blockSize := 0
+		gridSize := 0
 		align := Center
 		if len(drawArgs) > 2 {
-			blockSizeVal, blockSizeErr := strconv.ParseUint(drawArgs[2], 10, 8)
-			if blockSizeErr != nil || blockSizeVal > 3 {
-				panic("Invalid blockSize value")
+			gridSizeVal, gridSizeErr := strconv.ParseUint(drawArgs[2], 10, 8)
+			if gridSizeErr != nil || gridSizeVal > 3 {
+				panic("Invalid gridSize value")
 			}
-			blockSize = int(blockSizeVal) + 1
+			gridSize = int(gridSizeVal) + 1
 			if len(drawArgs) > 3 {
 				alignVal, alignErr := strconv.ParseInt(drawArgs[3], 10, 8)
 				if alignErr != nil || alignVal > 1 || alignVal < -1 {
@@ -547,7 +547,7 @@ func main() {
 			}
 		}
 		buildDB(false)
-		drawImage(db, srcFile, destFile, blockSize, align)
+		drawImage(db, srcFile, destFile, gridSize, align)
 		removeDB()
 		defer db.Close()
 	default:
@@ -578,9 +578,9 @@ draw: draw image
     ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
     sourceFile: source file to draw image from
     outputFile: file name of output
-	stepSize:  px to skip, allows better color allocation across entire image (default 0)
-	    valid values are (0, 1, 2, 3)
-    align:  optional alignment if dimensions dont match after resize (default 0)
+	gridSize:  px to skip, allows better color allocation across entire image (default 0)
+	    valid values are 0, 1, 2, 3 & generate corresponding px grids of 1, 4, 9, 16
+    align:  optional alignment if dimensions don't match after resize (default 0)
 	   -1: align with start (left or top)
 		0: align in center
 		1: alight with end (right or bottom)
