@@ -320,9 +320,7 @@ func prepDBFilesystem(cleanDB bool) {
 	}
 	// check db file exists
 	if cleanDB {
-		if exists(dbPath) {
-			delete(dbPath)
-		}
+		removeDB()
 		if exists(backupPath) {
 			delete(backupPath)
 		}
@@ -463,6 +461,12 @@ func buildDB(cleanDB bool) {
 	fmt.Println("DB ready…")
 }
 
+func removeDB() {
+	if exists(dbPath) {
+		delete(dbPath)
+	}
+}
+
 // endregion db
 
 // region main
@@ -528,6 +532,7 @@ func main() {
 		}
 		buildDB(false)
 		drawImage(db, srcFile, destFile, blockSize, align)
+		removeDB()
 		defer db.Close()
 	default:
 		printHelpMenu()
