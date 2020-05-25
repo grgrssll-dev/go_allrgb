@@ -64,6 +64,7 @@ var destFileName string
 var dbPath string
 var backupPath string
 var p *message.Printer
+var db *sql.DB
 var aspectRatios = []Aspect{
 	Aspect{Width: 1024, Height: 16384, Ratio: 0.0625},
 	Aspect{Width: 2048, Height: 8192, Ratio: 0.25},
@@ -116,31 +117,39 @@ func delete(path string) {
 // region draw
 func drawImage(srcFile *os.File, destFile *os.File, blockSize int, align Alignment) {
 	fmt.Println("Running <draw>…")
-	db := initDB()
 	srcImage := decodeImage(srcFile)
-	fmt.Println("decoded", srcImage.Bounds())
+	fmt.Println("Decoded", srcImage.Bounds())
 	srcWidth := srcImage.Bounds().Max.X
 	srcHeight := srcImage.Bounds().Max.Y
-	fmt.Println("src dims", srcWidth, srcHeight)
 	aspectRatio := findAspectRatio(srcWidth, srcHeight)
 	destWidth := aspectRatio.Width
 	destHeight := aspectRatio.Height
-	fmt.Println("creating images", aspectRatio)
+	fmt.Println("Creating images", aspectRatio)
 	destImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
-	srcImage = image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
-	fmt.Println("ready to resize", srcWidth, srcHeight, "->", aspectRatio)
-	srcResizedImage := resize.Resize(uint(destWidth), 0, srcImage, resize.Lanczos3)
+	sImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
+	fmt.Println("Ready to resize", srcWidth, srcHeight, "->", aspectRatio)
+	newHeight := math.Ceil(float64(destWidth) * float64(srcHeight) / float64(srcWidth))
+	srcResizedImage := resize.Resize(uint(destWidth), uint(newHeight), srcImage, resize.Lanczos3)
+	fmt.Println("Resized", srcResizedImage.Bounds())
 	srcWidth = srcResizedImage.Bounds().Max.X
 	srcHeight = srcResizedImage.Bounds().Max.Y
 	startPoint := getStartingPoint(srcWidth, srcHeight, destWidth, destHeight, align)
-	draw.Draw(destImage, destImage.Bounds(), srcImage, startPoint, draw.Src)
+	draw.Draw(sImage, destImage.Bounds(), srcResizedImage, startPoint, draw.Src)
+
+	// debugFileName, _ := homedir.Expand("~/Desktop/Debug.png")
+	// fmt.Println("-- Saving debug File", debugFileName)
+	// debugFile := touch(debugFileName)
+	// debugFile.Seek(0, 0)
+	// png.Encode(debugFile, srcResizedImage)
+	// debugFile.Close()
+
 	fmt.Println("ready to convert")
 	convertImage(db, srcImage, destImage, int(blockSize))
 	fmt.Println("encoding")
 	png.Encode(destFile, destImage)
+	destFile.Close()
 	err := os.Rename(destFileName+".part", destFileName)
 	check(err, "Error saving to file")
-	defer db.Close()
 }
 
 func convertImage(db *sql.DB, srcImage image.Image, destImage *image.RGBA, blockSize int) {
@@ -153,8 +162,6 @@ func convertImage(db *sql.DB, srcImage image.Image, destImage *image.RGBA, block
 	x := 0
 	y := 0
 	for pass < passCount {
-		// todo this is incorrect bc we don't want to go 0,0 -> 1,0 -> 0,1 -> 1,1
-		// we want to go 0,0 -> 1,1 -> 0,1 -> 1,0
 		xOffset = offsets[blockSize-1][pass%blockSize]
 		yOffset = offsets[blockSize-1][int(math.Floor(float64(pass)/float64(blockSize)))]
 		y = yOffset
@@ -179,9 +186,9 @@ func setColor(db *sql.DB, srcImage image.Image, destImage *image.RGBA, x int, y 
 func matchColor(db *sql.DB, srcColor color.Color) color.Color {
 	var matched ColorRow
 	lum := getLum(srcColor)
-	fmt.Println("Color", srcColor, "lum:", lum)
-	row1 := fetchRow(db, lum, "<")
+	row1 := fetchRow(db, lum, "<=")
 	row2 := fetchRow(db, lum, ">")
+	fmt.Println("Color", srcColor, "lum:", lum, "\n", row1, "\n", row2)
 	if row1.ID == -1 {
 		matched = row2
 	} else if row2.ID == -1 {
@@ -191,38 +198,44 @@ func matchColor(db *sql.DB, srcColor color.Color) color.Color {
 	} else {
 		matched = row2
 	}
-	statement, _ := db.Prepare("DELETE FROM colors WHERE id = ?")
-	statement.Exec(matched.ID)
+	statement, _ := db.Prepare("DELETE FROM colors WHERE r = ? AND g = ? AND b = ?")
+	statement.Exec(matched.R, matched.G, matched.B)
 	defer statement.Close()
-	return color.RGBA{matched.R, matched.G, matched.B, 255}
+	newColor := color.RGBA{matched.R, matched.G, matched.B, 255}
+	fmt.Println("New Color", newColor)
+	fmt.Println("Deleted ID", matched.R, matched.G, matched.B)
+	return newColor
 }
 
 func fetchRow(db *sql.DB, lum int, direction string) ColorRow {
-	var id int
-	var distance uint8
-	var r uint8
-	var g uint8
-	var b uint8
-	query := fmt.Sprintf(`SELECT id, ABS(lum - %d) AS distance, r, g, b
+	var colorRow ColorRow
+	query := fmt.Sprintf(`SELECT ABS(lum - %d) AS distance, r, g, b
 FROM colors
 WHERE %s
 ORDER BY distance ASC
-LIMIT 1`, lum, fmt.Sprintf("lum %s= %d", direction, lum))
+LIMIT 1`, lum, fmt.Sprintf("lum %s %d", direction, lum))
 	row := db.QueryRow(query)
-	switch err := row.Scan(&id, &distance, &r, &g, &b); err {
+	fmt.Println("Row", row, "|", query)
+	colorRow.ID = -1
+	switch err := row.Scan(&colorRow.Dist, &colorRow.R, &colorRow.G, &colorRow.B); err {
 	case sql.ErrNoRows:
-		return ColorRow{ID: -1, Dist: 255, R: 0, G: 0, B: 0}
+		return ColorRow{ID: -1, Dist: 0, R: 0, G: 0, B: 0}
 	case nil:
-		return ColorRow{ID: id, Dist: distance, R: r, G: g, B: b}
+		return colorRow
 	default:
+		fmt.Println("--ERROR", err)
 		panic(err)
 	}
 }
 
 func getLum(c color.Color) int {
 	r, g, b, _ := c.RGBA()
-	fmt.Println("CALC LUM", r, g, b)
-	return int(math.Round((float64(r) * 0.3) + (float64(g) * 0.59) + (float64(b) * 0.11)))
+	red := float64(r >> 8)
+	green := float64(g >> 8)
+	blue := float64(b >> 8)
+	lum := int(math.Round((red * 0.3) + (green * 0.59) + (blue * 0.11)))
+	fmt.Println("Calculate lum", "r: ", red, "g: ", green, "b: ", blue, "lum: ", lum)
+	return lum
 }
 
 func decodeImage(srcFile *os.File) image.Image {
@@ -248,6 +261,8 @@ func decodeImage(srcFile *os.File) image.Image {
 }
 
 func getStartingPoint(srcWidth, srcHeight, destWidth, destHeight int, align Alignment) image.Point {
+	fmt.Println("srcWidth:", srcWidth, "srcHeight:", srcHeight)
+	fmt.Println("destWidth:", destWidth, "destHeight:", destHeight)
 	startPoint := image.Point{0, 0}
 	if srcHeight > destHeight {
 		heightDiff := srcHeight - destHeight
@@ -264,6 +279,7 @@ func getStartingPoint(srcWidth, srcHeight, destWidth, destHeight int, align Alig
 			startPoint = image.Point{0, widthDiff}
 		}
 	}
+	fmt.Println("StartPoint", startPoint)
 	return startPoint
 }
 
@@ -312,28 +328,24 @@ func prepDBFilesystem(cleanDB bool) {
 	}
 }
 
-func createTable(db *sql.DB) {
-	fmt.Println("Creating fresh colors table…", db)
-	statement1, _ := db.Prepare("DROP TABLE colors")
+func createTable() {
+	fmt.Println("Creating fresh colors table…")
+	statement1, _ := db.Prepare("DROP TABLE IF EXISTS colors")
 	statement1.Exec()
-	defer statement1.Close()
-	fmt.Println("Creating table")
 	statement2, _ := db.Prepare(`CREATE TABLE colors(
-	id INTEGER PRIMARY KEY,
+	id UNSIGNED INTEGER PRIMARY KEY,
 	r UNSIGNED TINYINT NOT NULL,
 	g UNSIGNED TINYINT NOT NULL,
 	b UNSIGNED TINYINT NOT NULL,
 	lum UNSIGED TINYINT GENERATED ALWAYS AS (ROUND((r * 0.3) + (g * 0.59) + (b * 0.11), 0)) STORED
 )`)
 	statement2.Exec()
-	defer statement2.Close()
 	statement3, _ := db.Prepare("CREATE INDEX color_lum ON colors(lum)")
 	statement3.Exec()
-	defer statement2.Close()
 }
 
 // TODO zip backup before save
-func createBackup(db *sql.DB) {
+func createBackup() {
 	fmt.Println("Creating DB backup", backupPath, "…")
 	in := open(dbPath)
 	defer in.Close()
@@ -344,7 +356,7 @@ func createBackup(db *sql.DB) {
 }
 
 // TODO unzip backup before copy
-func createDbFromBackup(db *sql.DB) {
+func createDbFromBackup() {
 	fmt.Println("Creating DB from backup…")
 	in := open(backupPath)
 	defer in.Close()
@@ -354,11 +366,10 @@ func createDbFromBackup(db *sql.DB) {
 	check(err, "Error copying Backup File to DB")
 }
 
-func fillTable(db *sql.DB) {
-	fmt.Println("Filling colors table…", db)
+func fillTable() {
+	fmt.Println("Filling colors table…")
 	deleteStmt, _ := db.Prepare("DELETE FROM colors")
 	deleteStmt.Exec()
-	defer deleteStmt.Close()
 	var red uint16
 	var blue uint16
 	var green uint16
@@ -389,8 +400,8 @@ func fillTable(db *sql.DB) {
 					fmt.Printf("%s colors made %s\n", formattedTotal, dot)
 				}
 			}
-			insertQuery := fmt.Sprintf("INSERT INTO colors (r, g, b) VALUES %s", strings.Join(vals, ","))
-			_, err := db.Exec(insertQuery, valArgs...)
+			insertStmt := fmt.Sprintf("INSERT INTO colors (r, g, b) VALUES %s", strings.Join(vals, ","))
+			_, err := db.Exec(insertStmt, valArgs...)
 			check(err, "Error inserting into db")
 			green++
 		}
@@ -399,7 +410,7 @@ func fillTable(db *sql.DB) {
 	fmt.Printf("%08d colors made in %d seconds\n", total, time.Now().Unix()-start)
 }
 
-func doesTableExist(db *sql.DB) bool {
+func doesTableExist() bool {
 	var name string
 	row := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='colors'")
 	switch err := row.Scan(&name); err {
@@ -412,7 +423,7 @@ func doesTableExist(db *sql.DB) bool {
 	}
 }
 
-func isTableFull(db *sql.DB) bool {
+func isTableFull() bool {
 	var count int64
 	row := db.QueryRow("SELECT COUNT(*) AS count FROM colors")
 	switch err := row.Scan(&count); err {
@@ -428,38 +439,22 @@ func isTableFull(db *sql.DB) bool {
 func buildDB(cleanDB bool) {
 	fmt.Println("Running <db>…")
 	prepDBFilesystem(cleanDB)
-	db, err := sql.Open("sqlite3", dbPath)
-	check(err, "Error opening DB")
-	fmt.Println("DB Opened")
+	db, _ = sql.Open("sqlite3", dbPath)
 	backupExists := exists(backupPath)
-	if !doesTableExist(db) {
+	if !doesTableExist() {
 		if backupExists {
-			fmt.Println("DB from backup")
-			createDbFromBackup(db)
+			createDbFromBackup()
 		} else {
-			fmt.Println("DB from scratch")
-			createTable(db)
+			createTable()
 		}
 	}
-	if !isTableFull(db) {
-		fmt.Println("DB fill")
-		fillTable(db)
+	if !isTableFull() {
+		fillTable()
 		if !backupExists {
-			fmt.Println("DB to backup")
-			createBackup(db)
+			createBackup()
 		}
 	}
 	fmt.Println("DB ready…")
-}
-
-func initDB() *sql.DB {
-	db, err := sql.Open("sqlite3", dbPath)
-	check(err, "Error opening DB")
-	fmt.Println("DB Opened")
-	if !isTableFull(db) {
-		panic("Fill db fist, run ./allrgb db")
-	}
-	return db
 }
 
 // endregion db
@@ -489,6 +484,7 @@ func main() {
 			cleanDB = true
 		}
 		buildDB(cleanDB)
+		defer db.Close()
 		os.Exit(0)
 	case "draw":
 		drawArgs := args[1:]
@@ -524,7 +520,9 @@ func main() {
 				}
 			}
 		}
+		buildDB(false)
 		drawImage(srcFile, destFile, blockSize, align)
+		defer db.Close()
 	default:
 		printHelpMenu()
 	}
