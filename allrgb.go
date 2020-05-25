@@ -38,6 +38,15 @@ type Aspect struct {
 	Ratio  float64
 }
 
+// ColorRow from db
+type ColorRow struct {
+	ID   int
+	Dist uint8
+	R    uint8
+	G    uint8
+	B    uint8
+}
+
 const (
 	// Start alignment
 	Start Alignment = -1
@@ -94,6 +103,7 @@ var offsets = [][]int{
 // region utils
 func check(e error, msg string) {
 	if e != nil {
+		fmt.Println("Error:", e)
 		panic(msg)
 	}
 }
@@ -129,19 +139,25 @@ func delete(path string) {
 func drawImage(srcFile *os.File, destFile *os.File, blockSize int, align Alignment) {
 	fmt.Println("Running <draw>…")
 	srcImage := decodeImage(srcFile)
+	fmt.Println("decoded", srcImage.Bounds())
 	srcWidth := srcImage.Bounds().Max.X
 	srcHeight := srcImage.Bounds().Max.Y
+	fmt.Println("src dims", srcWidth, srcHeight)
 	aspectRatio := findAspectRatio(srcWidth, srcHeight)
 	destWidth := aspectRatio.Width
 	destHeight := aspectRatio.Height
+	fmt.Println("creating images", aspectRatio)
 	destImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
 	srcImage = image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
+	fmt.Println("ready to resize", srcWidth, srcHeight, "->", aspectRatio)
 	srcResizedImage := resize.Resize(uint(destWidth), 0, srcImage, resize.Lanczos3)
 	srcWidth = srcResizedImage.Bounds().Max.X
 	srcHeight = srcResizedImage.Bounds().Max.Y
 	startPoint := getStartingPoint(srcWidth, srcHeight, destWidth, destHeight, align)
 	draw.Draw(destImage, destImage.Bounds(), srcImage, startPoint, draw.Src)
+	fmt.Println("ready to convert")
 	convertImage(srcImage, destImage, int(blockSize))
+	fmt.Println("encoding")
 	png.Encode(destFile, destImage)
 	err := os.Rename(destFileName+".part", destFileName)
 	check(err, "Error saving to file")
@@ -156,13 +172,11 @@ func convertImage(srcImage image.Image, destImage *image.RGBA, blockSize int) {
 	yOffset := 0
 	x := 0
 	y := 0
-	var offset int
 	for pass < passCount {
 		// todo this is incorrect bc we don't want to go 0,0 -> 1,0 -> 0,1 -> 1,1
 		// we want to go 0,0 -> 1,1 -> 0,1 -> 1,0
-		offset = offsets[blockSize-1][pass]
-		xOffset = pass % offset
-		yOffset = int(math.Floor(float64(pass) / float64(offset)))
+		xOffset = offsets[blockSize-1][pass%blockSize]
+		yOffset = offsets[blockSize-1][int(math.Floor(float64(pass)/float64(blockSize)))]
 		y = yOffset
 		x = xOffset
 		for y < height {
@@ -183,30 +197,52 @@ func setColor(srcImage image.Image, destImage *image.RGBA, x int, y int) {
 }
 
 func matchColor(srcColor color.Color) color.Color {
+	var matched ColorRow
+	lum := getLum(srcColor)
+	fmt.Println("Color", srcColor, "lum:", lum)
+	row1 := fetchRow(lum, "<")
+	row2 := fetchRow(lum, ">")
+	if row1.ID == -1 {
+		matched = row2
+	} else if row2.ID == -1 {
+		matched = row1
+	} else if row1.Dist <= row2.Dist {
+		matched = row1
+	} else {
+		matched = row2
+	}
+	statement, _ := db.Prepare("DELETE FROM colors WHERE id = ?")
+	statement.Exec(matched.ID)
+	defer statement.Close()
+	return color.RGBA{matched.R, matched.G, matched.B, 255}
+}
+
+func fetchRow(lum int, direction string) ColorRow {
 	var id int
 	var distance uint8
 	var r uint8
 	var g uint8
 	var b uint8
-	lum := getLum(srcColor)
-	// TODO is this faster than 2 queries???
 	query := fmt.Sprintf(`SELECT id, ABS(lum - %d) AS distance, r, g, b
-FROM (
-	(SELECT id, r, g, b, lum FROM colors WHERE lum >= %d ORDER BY lum LIMIT 1)
-	UNION ALL
-	(SELECT id, r, g, b, lum FROM colors WHERE lum < %d ORDER BY lum DESC LIMIT 1)
-) AS n ORDER BY distance ASC LIMIT 1`, lum, lum, lum)
+FROM colors
+WHERE %s
+ORDER BY distance ASC
+LIMIT 1`, lum, fmt.Sprintf("lum %s= %d", direction, lum))
+	fmt.Println("Query\n", query, "\n")
 	row := db.QueryRow(query)
-	err := row.Scan(&id, &distance, &r, &g, &b)
-	check(err, "Cannot find color for lum")
-	statement, _ := db.Prepare("DELETE FROM colors WHERE id = ?")
-	statement.Exec(id)
-	defer statement.Close()
-	return color.RGBA{r, g, b, 255}
+	switch err := row.Scan(&id, &distance, &r, &g, &b); err {
+	case sql.ErrNoRows:
+		return ColorRow{ID: -1, Dist: 255, R: 0, G: 0, B: 0}
+	case nil:
+		return ColorRow{ID: id, Dist: distance, R: r, G: g, B: b}
+	default:
+		panic(err)
+	}
 }
 
 func getLum(c color.Color) int {
 	r, g, b, _ := c.RGBA()
+	fmt.Println("CALC LUM", r, g, b)
 	return int(math.Round((float64(r) * 0.3) + (float64(g) * 0.59) + (float64(b) * 0.11)))
 }
 
@@ -215,14 +251,18 @@ func decodeImage(srcFile *os.File) image.Image {
 	_, imageType, err := image.Decode(srcFile)
 	check(err, "Error reading image")
 	srcFile.Seek(0, 0)
-	switch imageType {
-	case "png":
+	fmt.Println("Image Type", imageType)
+	if imageType == "png" {
+		fmt.Println("Decoding PNG")
 		srcImage, err = png.Decode(srcFile)
-	case "jpg":
+	}
+	if imageType == "jpeg" {
+		fmt.Println("Decoding JPEG")
 		srcImage, err = jpeg.Decode(srcFile)
-	case "gif":
+	}
+	if imageType == "gif" {
+		fmt.Println("Decoding GIF")
 		srcImage, err = gif.Decode(srcFile)
-	default:
 	}
 	check(err, "Error decoding image")
 	return srcImage
@@ -251,10 +291,12 @@ func getStartingPoint(srcWidth, srcHeight, destWidth, destHeight int, align Alig
 func findAspectRatio(width int, height int) Aspect {
 	var aspectRatio Aspect
 	imageAR := float64(width) / float64(height)
+	fmt.Println("src aspect ratio", imageAR)
 	distance := float64(totalColors)
 	for _, ar := range aspectRatios {
-		if math.Abs(imageAR-ar.Ratio) < distance {
-			distance = ar.Ratio
+		arDist := math.Abs(imageAR - ar.Ratio)
+		if arDist < distance {
+			distance = arDist
 			aspectRatio = ar
 		}
 	}
@@ -292,12 +334,12 @@ func prepDBFilesystem(cleanDB bool) {
 }
 
 func createTable() {
-	fmt.Println("Creating fresh colors table…")
+	fmt.Println("Creating fresh colors table…", db)
 	statement1, _ := db.Prepare("DROP TABLE colors")
 	statement1.Exec()
 	defer statement1.Close()
 	statement2, _ := db.Prepare(`CREATE TABLE colors(
-	id UNSIGNED INT AUTO_INCREMENT PRIMARY KEY,
+	id INTEGER PRIMARY KEY,
 	r UNSIGNED TINYINT NOT NULL,
 	g UNSIGNED TINYINT NOT NULL,
 	b UNSIGNED TINYINT NOT NULL,
@@ -337,9 +379,9 @@ func fillTable() {
 	deleteStmt, _ := db.Prepare("DELETE FROM colors")
 	deleteStmt.Exec()
 	defer deleteStmt.Close()
-	var red uint16 = 0
-	var blue uint16 = 0
-	var green uint16 = 0
+	var red uint16
+	var blue uint16
+	var green uint16
 	var vals []string
 	var valArgs []interface{}
 	total := 0
@@ -350,7 +392,6 @@ func fillTable() {
 	fmt.Println("Generating 16,777,216 unique colors…")
 	for red < 256 {
 		green = 0
-		blue = 0
 		for green < 256 {
 			blue = 0
 			vals = make([]string, 0, 256)
@@ -408,7 +449,7 @@ func buildDB(cleanDB bool) {
 	fmt.Println("Running <db>…")
 	prepDBFilesystem(cleanDB)
 	db, _ = sql.Open("sqlite3", dbPath)
-	defer db.Close()
+	fmt.Println("DB Opened")
 	backupExists := exists(backupPath)
 	if !doesTableExist() {
 		if backupExists {
@@ -449,7 +490,7 @@ func main() {
 	case "db":
 		dbArgs := args[1:]
 		cleanDB := false
-		if len(dbArgs) == 1 && dbArgs[0] == "clean" {
+		if len(dbArgs) == 1 && (dbArgs[0] == "clean" || dbArgs[0] == "force") {
 			cleanDB = true
 		}
 		buildDB(cleanDB)
@@ -488,10 +529,15 @@ func main() {
 				}
 			}
 		}
+		buildDB(false)
 		drawImage(srcFile, destFile, blockSize, align)
 	default:
 		printHelpMenu()
 	}
+	defer func() {
+		fmt.Println("-- Closing DB")
+		db.Close()
+	}()
 	os.Exit(0)
 }
 
@@ -528,8 +574,7 @@ Examples
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ./allrgb help
 ./allrgb db ~/.mydb
-./allrgb draw input/file.png output/file.png 3 0
-`)
+./allrgb draw input/file.png output/file.png 3 0`)
 }
 
 //endregion help
