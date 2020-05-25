@@ -178,20 +178,18 @@ func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, block
 	yOffset := 0
 	x := 0
 	y := 0
-	i := 0
+	i := 1
 	for pass < passCount {
 		xOffset = xOffsets[blockSize-1][pass]
 		yOffset = yOffsets[blockSize-1][pass]
-		fmt.Println("xo:", x, "yo:", y, "bs:", blockSize, "pass:", pass)
+		rows := int(math.Floor(float64(height-yOffset) / float64(blockSize)))
+		fmt.Println("xoff:", x, "yoff:", y, "blockSize:", blockSize, "pass:", pass)
 		for y = yOffset; y < height; y += blockSize {
-			fmt.Println("=====================================================================")
 			for x = xOffset; x < width; x += blockSize {
-				if i%blockSize == 0 {
-					fmt.Println("x:", x, "y:", y)
-				}
 				setColor(db, srcImage, destImage, x, y)
-				i++
 			}
+			fmt.Printf("row %d of %d completed for this pass\n", i, rows)
+			i++
 		}
 		fmt.Printf("************** Pass %d of %d completed (time elapsed: %d) **************\n",
 			pass+1, passCount, time.Now().Unix()-start)
@@ -209,7 +207,7 @@ func setColor(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, x int, y 
 func matchColor(db *sql.DB, srcColor color.RGBA, tick int) color.RGBA {
 	var matched ColorRow
 	c1 := "<"
-	c2 := "<"
+	c2 := ">"
 	comp1 := c1
 	comp2 := c2
 	if tick == 1 {
@@ -232,7 +230,6 @@ func matchColor(db *sql.DB, srcColor color.RGBA, tick int) color.RGBA {
 	statement.Exec(matched.R, matched.G, matched.B)
 	defer statement.Close()
 	newColor := color.RGBA{matched.R, matched.G, matched.B, 255}
-	// fmt.Println("--SrcColor", srcColor, "\n--NewColor", newColor, "\n--Dist", matched.Dist, "-", lum)
 	return newColor
 }
 
@@ -263,7 +260,6 @@ func getLum(c color.RGBA) int {
 	green := float64(g >> 8)
 	blue := float64(b >> 8)
 	lum := int(math.Round((red * 0.3) + (green * 0.59) + (blue * 0.11)))
-	// fmt.Println("Calculate lum", "r: ", red, "g: ", green, "b: ", blue, "lum: ", lum)
 	return lum
 }
 
