@@ -167,32 +167,33 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, blockSize int, a
 }
 
 func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, blockSize int) {
-	var passOff int
 	now := time.Now()
 	start := now.Unix()
 	width := destImage.Bounds().Max.X
 	height := destImage.Bounds().Max.Y
+	fmt.Println("width:", width, "height:", height)
 	passCount := int(blockSize * blockSize)
 	pass := 0
 	xOffset := 0
 	yOffset := 0
 	x := 0
 	y := 0
+	i := 0
 	for pass < passCount {
-		passOff = pass % blockSize
-		xOffset = xOffsets[blockSize-1][passOff]
-		yOffset = yOffsets[blockSize-1][passOff]
-		y = yOffset
-		x = xOffset
-		fmt.Println("xo:", x, "yo:", y)
-		for y < height {
-			for x < width {
+		xOffset = xOffsets[blockSize-1][pass]
+		yOffset = yOffsets[blockSize-1][pass]
+		fmt.Println("xo:", x, "yo:", y, "bs:", blockSize, "pass:", pass)
+		for y = yOffset; y < height; y += blockSize {
+			fmt.Println("=====================================================================")
+			for x = xOffset; x < width; x += blockSize {
+				if i%blockSize == 0 {
+					fmt.Println("x:", x, "y:", y)
+				}
 				setColor(db, srcImage, destImage, x, y)
-				x = x + blockSize
+				i++
 			}
-			y = y + blockSize
 		}
-		fmt.Printf("**** Pass %d of %d completed (time elapsed: %d) ****\n",
+		fmt.Printf("************** Pass %d of %d completed (time elapsed: %d) **************\n",
 			pass+1, passCount, time.Now().Unix()-start)
 		pass++
 	}
@@ -203,7 +204,6 @@ func setColor(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, x int, y 
 	srcColor := srcImage.RGBAAt(x, y)
 	destColor := matchColor(db, srcColor, x%2)
 	destImage.SetRGBA(x, y, destColor)
-	fmt.Println("x:", x, "y:", y)
 }
 
 func matchColor(db *sql.DB, srcColor color.RGBA, tick int) color.RGBA {
@@ -232,7 +232,7 @@ func matchColor(db *sql.DB, srcColor color.RGBA, tick int) color.RGBA {
 	statement.Exec(matched.R, matched.G, matched.B)
 	defer statement.Close()
 	newColor := color.RGBA{matched.R, matched.G, matched.B, 255}
-	fmt.Println("--SrcColor", srcColor, "\n--NewColor", newColor, "\n--Dist", matched.Dist, "-", lum)
+	// fmt.Println("--SrcColor", srcColor, "\n--NewColor", newColor, "\n--Dist", matched.Dist, "-", lum)
 	return newColor
 }
 
@@ -408,18 +408,15 @@ func fillTable() {
 	now := time.Now()
 	start := now.Unix()
 	fmt.Println("Generating 16,777,216 unique colors…")
-	for red < 256 {
-		green = 0
-		for green < 256 {
-			blue = 0
+	for red = 0; red < 256; red++ {
+		for green = 0; green < 256; green++ {
 			vals = make([]string, 0, 256)
 			valArgs = make([]interface{}, 0, 256*3)
-			for blue < 256 {
+			for blue = 0; blue < 256; blue++ {
 				vals = append(vals, "(?, ?, ?)")
 				valArgs = append(valArgs, red)
 				valArgs = append(valArgs, green)
 				valArgs = append(valArgs, blue)
-				blue++
 				total++
 				if total > 1 && total%1000000 == 0 {
 					dot = dot + "."
@@ -430,9 +427,7 @@ func fillTable() {
 			insertStmt := fmt.Sprintf("INSERT INTO colors (r, g, b) VALUES %s", strings.Join(vals, ","))
 			_, err := db.Exec(insertStmt, valArgs...)
 			check(err, "Error inserting into db")
-			green++
 		}
-		red++
 	}
 	fmt.Printf("%08d colors made in %d seconds\n", total, time.Now().Unix()-start)
 }
