@@ -54,7 +54,7 @@ const (
 	End Alignment = 1
 )
 const totalColors int64 = 16777216
-const vacuumFreq = 1048576
+const vacuumFreq = 131072
 const dbFileName = "allrgb.db"
 const backupDbFileName = "allrgb.db.backup"
 const storageFolderName = ".allrgb"
@@ -167,10 +167,11 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, gridSize int, al
 }
 
 func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, gridSize int) {
+	var vacStart int64
 	passComplete := "************** Pass %d of %d completed (time elapsed: %d) **************\n"
-	rowComplete := "row %d of %d completed for this pass\n"
-	now := time.Now()
-	start := now.Unix()
+	rowComplete := "row %d of %d completed for pass %d\n"
+	vacuumingMsg := "Vacuuming completed in %d seconds\n"
+	start := time.Now().Unix()
 	width := destImage.Bounds().Max.X
 	height := destImage.Bounds().Max.Y
 	passCount := int(gridSize * gridSize)
@@ -190,15 +191,19 @@ func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, gridS
 			for x = xOffset; x < width; x += gridSize {
 				setColor(db, srcImage, destImage, x, y)
 				if px == vacuumFreq {
+					vacStart = time.Now().Unix()
 					fmt.Println("#### VACUUMING DB ####")
 					vacStmt, _ := db.Prepare("VACUUM")
 					vacStmt.Exec()
 					vacStmt.Close()
 					px = 0
+					fmt.Printf(vacuumingMsg, time.Now().Unix()-vacStart)
 				}
 				px++
 			}
-			fmt.Printf(rowComplete, i, rows)
+			if i%10 == 0 && i > 0 {
+				fmt.Printf(rowComplete, i, rows, pass+1)
+			}
 			i++
 		}
 		fmt.Printf(passComplete, pass+1, passCount, time.Now().Unix()-start)
