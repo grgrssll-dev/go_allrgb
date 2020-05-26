@@ -125,7 +125,7 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, gridSize int, al
 	var srcResizedImage image.Image
 	var newHeight int
 	var newWidth int
-	fmt.Println("Running <draw>…")
+	fmt.Println("Running <draw>…", time.Now().Unix())
 	srcImage := decodeImage(srcFile)
 	srcWidth := srcImage.Bounds().Max.X
 	srcHeight := srcImage.Bounds().Max.Y
@@ -135,7 +135,7 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, gridSize int, al
 	destImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
 	sImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
 	fmt.Println("Ready to resize", srcWidth, srcHeight, "->", aspectRatio)
-	if srcWidth > srcHeight {
+	if srcWidth < srcHeight {
 		newWidth = destWidth
 		newHeight = int(math.Ceil(float64(destWidth) * float64(srcHeight) / float64(srcWidth)))
 	} else {
@@ -596,12 +596,12 @@ draw: draw image
     ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
     sourceFile: source file to draw image from
     outputFile: file name of output
-	gridSize:  px to skip, allows better color allocation across entire image (default 0)
+	  gridSize:  px to skip, allows better color allocation across entire image (default 0)
 	    valid values are 0, 1, 2, 3 & generate corresponding px grids of 1, 4, 9, 16
     align:  optional alignment if dimensions don't match after resize (default 0)
 	   -1: align with start (left or top)
-		0: align in center
-		1: alight with end (right or bottom)
+		  0: align in center
+		  1: alight with end (right or bottom)
 
 Examples
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
