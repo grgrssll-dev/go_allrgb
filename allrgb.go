@@ -121,6 +121,19 @@ func delete(path string) {
 // endregion utils
 
 // region draw
+
+func calculateNewHeight(dWidth int, sWidth int, sHeight int) (newWidth int, newHeight int) {
+	nWidth := dWidth
+	nHeight := int(math.Ceil(float64(dWidth) * float64(sHeight) / float64(sWidth)))
+	return nWidth, nHeight
+}
+
+func calculateNewWidth(dHeight int, sWidth int, sHeight int) (newWidth int, newHeight int) {
+	nHeight := dHeight
+	nWidth := int(math.Ceil(float64(sWidth) * float64(dHeight) / float64(sHeight)))
+	return nWidth, nHeight
+}
+
 func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, gridSize int, align Alignment) {
 	var srcResizedImage image.Image
 	var newHeight int
@@ -135,12 +148,9 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, gridSize int, al
 	destImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
 	sImage := image.NewRGBA(image.Rect(0, 0, destWidth, destHeight))
 	fmt.Println("Ready to resize", srcWidth, srcHeight, "->", aspectRatio)
-	if srcWidth < srcHeight {
-		newWidth = destWidth
-		newHeight = int(math.Ceil(float64(destWidth) * float64(srcHeight) / float64(srcWidth)))
-	} else {
-		newHeight = destHeight
-		newWidth = int(math.Ceil(float64(srcWidth) * float64(destHeight) / float64(srcHeight)))
+	newWidth, newHeight = calculateNewHeight(destWidth, srcWidth, srcHeight)
+	if newHeight < destHeight {
+		newWidth, newHeight = calculateNewWidth(destHeight, srcWidth, srcHeight)
 	}
 	srcResizedImage = resize.Resize(uint(newWidth), uint(newHeight), srcImage, resize.Lanczos3)
 	fmt.Println("Resized", srcResizedImage.Bounds())
