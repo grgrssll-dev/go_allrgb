@@ -1,8 +1,7 @@
 package main
 
-// TODO make sure delete db file when finished making image
-// TODO check srcImage and get aspect ratio
-// TODO make new image with right # of px in similar aspect ratio
+// TODO compress backup file
+// Check on Closing stmt after use (in code but does it work?)
 
 import (
 	"database/sql"
@@ -55,6 +54,7 @@ const (
 	End Alignment = 1
 )
 const totalColors int64 = 16777216
+const vacuumFreq = 1048576
 const dbFileName = "allrgb.db"
 const backupDbFileName = "allrgb.db.backup"
 const storageFolderName = ".allrgb"
@@ -167,11 +167,12 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, gridSize int, al
 }
 
 func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, gridSize int) {
+	passComplete := "************** Pass %d of %d completed (time elapsed: %d) **************\n"
+	rowComplete := "row %d of %d completed for this pass\n"
 	now := time.Now()
 	start := now.Unix()
 	width := destImage.Bounds().Max.X
 	height := destImage.Bounds().Max.Y
-	fmt.Println("width:", width, "height:", height)
 	passCount := int(gridSize * gridSize)
 	pass := 0
 	xOffset := 0
@@ -179,6 +180,7 @@ func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, gridS
 	x := 0
 	y := 0
 	i := 1
+	px := 0
 	for pass < passCount {
 		xOffset = xOffsets[gridSize-1][pass]
 		yOffset = yOffsets[gridSize-1][pass]
@@ -187,12 +189,19 @@ func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, gridS
 		for y = yOffset; y < height; y += gridSize {
 			for x = xOffset; x < width; x += gridSize {
 				setColor(db, srcImage, destImage, x, y)
+				if px == vacuumFreq {
+					fmt.Println("#### VACUUMING DB ####")
+					vacStmt, _ := db.Prepare("VACUUM")
+					vacStmt.Exec()
+					vacStmt.Close()
+					px = 0
+				}
+				px++
 			}
-			fmt.Printf("row %d of %d completed for this pass\n", i, rows)
+			fmt.Printf(rowComplete, i, rows)
 			i++
 		}
-		fmt.Printf("************** Pass %d of %d completed (time elapsed: %d) **************\n",
-			pass+1, passCount, time.Now().Unix()-start)
+		fmt.Printf(passComplete, pass+1, passCount, time.Now().Unix()-start)
 		pass++
 	}
 	fmt.Println("Finished converting image, duration:", time.Now().Unix()-start)
@@ -347,7 +356,7 @@ func prepDBFilesystem(cleanDB bool) {
 		}
 	}
 	if !exists(dbPath) {
-		_ = touch(dbPath)
+		touch(dbPath)
 	}
 }
 
@@ -355,6 +364,7 @@ func createTable() {
 	fmt.Println("Creating fresh colors table…")
 	statement1, _ := db.Prepare("DROP TABLE IF EXISTS colors")
 	statement1.Exec()
+	statement1.Close()
 	statement2, _ := db.Prepare(`CREATE TABLE colors(
 	r UNSIGNED TINYINT NOT NULL,
 	g UNSIGNED TINYINT NOT NULL,
@@ -363,8 +373,10 @@ func createTable() {
 	PRIMARY KEY(r, g, b)
 )`)
 	statement2.Exec()
+	statement2.Close()
 	statement3, _ := db.Prepare("CREATE INDEX color_lum ON colors(lum)")
 	statement3.Exec()
+	statement3.Close()
 }
 
 // TODO zip backup before save
@@ -393,6 +405,7 @@ func fillTable() {
 	fmt.Println("Filling colors table…")
 	deleteStmt, _ := db.Prepare("DELETE FROM colors")
 	deleteStmt.Exec()
+	deleteStmt.Close()
 	var red uint16
 	var blue uint16
 	var green uint16
