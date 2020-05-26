@@ -186,7 +186,7 @@ func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, gridS
 		xOffset = xOffsets[gridSize-1][pass]
 		yOffset = yOffsets[gridSize-1][pass]
 		rows := int(math.Floor(float64(height-yOffset) / float64(gridSize)))
-		fmt.Println("xoff:", x, "yoff:", y, "gridSize:", gridSize, "pass:", pass)
+		fmt.Println("xoff:", xOffset, "yoff:", yOffset, "gridSize:", gridSize, "pass:", pass)
 		for y = yOffset; y < height; y += gridSize {
 			for x = xOffset; x < width; x += gridSize {
 				setColor(db, srcImage, destImage, x, y)
