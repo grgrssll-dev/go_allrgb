@@ -111,7 +111,7 @@ func drawImage(srcFile *os.File, destFile *os.File, spread int, align Alignment)
 	var srcResizedImage image.Image
 	var newHeight int
 	var newWidth int
-	fmt.Println("Running <draw>…", time.Now().Unix())
+	fmt.Println("Running <draw>…")
 	srcImage := decodeImage(srcFile)
 	srcWidth := srcImage.Bounds().Max.X
 	srcHeight := srcImage.Bounds().Max.Y
@@ -132,9 +132,9 @@ func drawImage(srcFile *os.File, destFile *os.File, spread int, align Alignment)
 	startPoint := getStartingPoint(srcWidth, srcHeight, destWidth, destHeight, align)
 	sRect := image.Rect(startPoint.X, startPoint.Y, startPoint.X+newWidth, startPoint.Y+newHeight)
 	draw.Draw(sImage, sRect, srcResizedImage, image.ZP, draw.Src)
-	fmt.Println("ready to convert")
+	fmt.Println("Ready to convert")
 	convertImage(sImage, destImage, int(spread))
-	fmt.Println("encoding")
+	fmt.Println("Encoding file")
 	png.Encode(destFile, destImage)
 	destFile.Close()
 	err := os.Rename(destFileName+".part", destFileName)
@@ -142,7 +142,6 @@ func drawImage(srcFile *os.File, destFile *os.File, spread int, align Alignment)
 }
 
 func convertImage(srcImage *image.RGBA, destImage *image.RGBA, spread int) {
-	passComplete := "\n************** Pass %d of %d completed (time elapsed: %d) **************\n"
 	start := time.Now().Unix()
 	width := destImage.Bounds().Max.X
 	height := destImage.Bounds().Max.Y
@@ -161,10 +160,10 @@ func convertImage(srcImage *image.RGBA, destImage *image.RGBA, spread int) {
 				setColor(srcImage, destImage, x, y)
 			}
 		}
-		fmt.Printf(passComplete, pass+1, passCount, time.Now().Unix()-start)
+		fmt.Printf("Pass %d of %d completed (time elapsed: %d)\n", pass+1, passCount, time.Now().Unix()-start)
 		pass++
 	}
-	fmt.Println("Finished converting image, duration:", time.Now().Unix()-start)
+	fmt.Println("Finished converting image, duration:", time.Now().Unix()-start, "seconds")
 }
 
 func setColor(srcImage *image.RGBA, destImage *image.RGBA, x int, y int) {
@@ -226,7 +225,7 @@ func getStartingPoint(srcWidth, srcHeight, destWidth, destHeight int, align Alig
 func findAspectRatio(width int, height int) Aspect {
 	var aspectRatio Aspect
 	imageAR := float64(width) / float64(height)
-	fmt.Println("src aspect ratio", imageAR)
+	fmt.Println("Source image aspect ratio", imageAR)
 	distance := float64(totalColors)
 	for _, ar := range aspectRatios {
 		arDist := math.Abs(imageAR - ar.Ratio)
