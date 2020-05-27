@@ -4,10 +4,7 @@ package main
 // Check on Closing stmt after use (in code but does it work?)
 
 import (
-	"database/sql"
 	"fmt"
-	_ "github.com/mattn/go-sqlite3"
-	"github.com/mitchellh/go-homedir"
 	"github.com/nfnt/resize"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -17,12 +14,10 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
-	"io"
 	"math"
 	"os"
-	"path"
+	"sort"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -36,13 +31,11 @@ type Aspect struct {
 	Ratio  float64
 }
 
-// ColorRow from db
-type ColorRow struct {
-	Found bool
-	Dist  uint8
-	R     uint8
-	G     uint8
-	B     uint8
+// RGBColor color
+type RGBColor struct {
+	R uint8
+	G uint8
+	B uint8
 }
 
 const (
@@ -54,17 +47,11 @@ const (
 	End Alignment = 1
 )
 const totalColors int64 = 16777216
-const vacuumFreq = 131072
-const dbFileName = "allrgb.db"
-const backupDbFileName = "allrgb.db.backup"
-const storageFolderName = ".allrgb"
 
-var storagePath string
+var data map[int][]RGBColor
+var keys []int
 var destFileName string
-var dbPath string
-var backupPath string
 var p *message.Printer
-var db *sql.DB
 var aspectRatios = []Aspect{
 	Aspect{Width: 1024, Height: 16384, Ratio: 0.0625},
 	Aspect{Width: 2048, Height: 8192, Ratio: 0.25},
@@ -93,11 +80,6 @@ func check(e error, msg string) {
 	}
 }
 
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return !os.IsNotExist(err)
-}
-
 func touch(path string) *os.File {
 	fmt.Println("Creating:", path)
 	file, err := os.Create(path)
@@ -110,12 +92,6 @@ func open(path string) *os.File {
 	file, err := os.Open(path)
 	check(err, "Error Opening "+path)
 	return file
-}
-
-func delete(path string) {
-	fmt.Println("Deleting :" + path)
-	err := os.Remove(path)
-	check(err, "Error deleting "+path)
 }
 
 // endregion utils
@@ -134,7 +110,7 @@ func calculateNewWidth(dHeight int, sWidth int, sHeight int) (newWidth int, newH
 	return nWidth, nHeight
 }
 
-func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, gridSize int, align Alignment) {
+func drawImage(srcFile *os.File, destFile *os.File, spread int, align Alignment) {
 	var srcResizedImage image.Image
 	var newHeight int
 	var newWidth int
@@ -168,7 +144,7 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, gridSize int, al
 	// debugFile.Close()
 
 	fmt.Println("ready to convert")
-	convertImage(db, sImage, destImage, int(gridSize))
+	convertImage(sImage, destImage, int(spread))
 	fmt.Println("encoding")
 	png.Encode(destFile, destImage)
 	destFile.Close()
@@ -176,47 +152,25 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, gridSize int, al
 	check(err, "Error saving to file")
 }
 
-func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, gridSize int) {
-	var vacStart int64
+func convertImage(srcImage *image.RGBA, destImage *image.RGBA, spread int) {
 	passComplete := "\n************** Pass %d of %d completed (time elapsed: %d) **************\n"
-	rowComplete := "\nrow %d of %d completed for pass %d\n"
-	vacuumingMsg := "Vacuuming completed in %d seconds\n"
 	start := time.Now().Unix()
 	width := destImage.Bounds().Max.X
 	height := destImage.Bounds().Max.Y
-	passCount := int(gridSize * gridSize)
+	passCount := int(spread * spread)
 	pass := 0
 	xOffset := 0
 	yOffset := 0
 	x := 0
 	y := 0
-	i := 1
-	px := 0
 	for pass < passCount {
-		xOffset = xOffsets[gridSize-1][pass]
-		yOffset = yOffsets[gridSize-1][pass]
-		rows := int(math.Floor(float64(height-yOffset) / float64(gridSize)))
-		fmt.Println("xoff:", xOffset, "yoff:", yOffset, "gridSize:", gridSize, "pass:", pass)
-		for y = yOffset; y < height; y += gridSize {
-			i = 0
-			for x = xOffset; x < width; x += gridSize {
-				setColor(db, srcImage, destImage, x, y)
-				fmt.Print(".")
-				if px == vacuumFreq {
-					vacStart = time.Now().Unix()
-					fmt.Println("\n#### VACUUMING DB ####")
-					vacStmt, _ := db.Prepare("VACUUM")
-					vacStmt.Exec()
-					vacStmt.Close()
-					px = 0
-					fmt.Printf(vacuumingMsg, time.Now().Unix()-vacStart)
-				}
-				px++
+		xOffset = xOffsets[spread-1][pass]
+		yOffset = yOffsets[spread-1][pass]
+		fmt.Println("xoff:", xOffset, "yoff:", yOffset, "spread:", spread, "pass:", pass)
+		for y = yOffset; y < height; y += spread {
+			for x = xOffset; x < width; x += spread {
+				setColor(srcImage, destImage, x, y)
 			}
-			if i%10 == 0 && i > 0 {
-				fmt.Printf(rowComplete, i, rows, pass+1)
-			}
-			i++
 		}
 		fmt.Printf(passComplete, pass+1, passCount, time.Now().Unix()-start)
 		pass++
@@ -224,69 +178,17 @@ func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, gridS
 	fmt.Println("Finished converting image, duration:", time.Now().Unix()-start)
 }
 
-func setColor(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, x int, y int) {
+func setColor(srcImage *image.RGBA, destImage *image.RGBA, x int, y int) {
 	srcColor := srcImage.RGBAAt(x, y)
-	destColor := matchColor(db, srcColor, x%2)
+	destColor := matchColor(srcColor)
 	destImage.SetRGBA(x, y, destColor)
 }
 
-func matchColor(db *sql.DB, srcColor color.RGBA, tick int) color.RGBA {
-	var matched ColorRow
-	c1 := "<"
-	c2 := ">"
-	comp1 := c1
-	comp2 := c2
-	if tick == 1 {
-		comp1 = c2
-		comp2 = c1
-	}
-	lum := getLum(srcColor)
-	row := fetchRow(db, lum, "=")
-	if row.Found {
-		matched = row
-	} else {
-		row1 := fetchRow(db, lum, comp1)
-		if row1.Found {
-			matched = row1
-		} else {
-			matched = fetchRow(db, lum, comp2)
-		}
-	}
-	statement, _ := db.Prepare("DELETE FROM colors WHERE r = ? AND g = ? AND b = ?")
-	statement.Exec(matched.R, matched.G, matched.B)
-	defer statement.Close()
-	newColor := color.RGBA{matched.R, matched.G, matched.B, 255}
-	return newColor
-}
-
-func fetchRow(db *sql.DB, lum int, comparison string) ColorRow {
-	var colorRow ColorRow
-	var row *sql.Row
-	if comparison == "=" {
-		row = db.QueryRow(fmt.Sprintf(`SELECT '0' AS distance, r, g, b
-FROM colors WHERE lum %s %d ORDER BY distance ASC LIMIT 1`, comparison, lum))
-	} else {
-		row = db.QueryRow(fmt.Sprintf(`SELECT ABS(lum - %d) AS distance, r, g, b
-FROM colors WHERE lum %s %d ORDER BY distance ASC LIMIT 1`, lum, comparison, lum))
-	}
-	switch err := row.Scan(&colorRow.Dist, &colorRow.R, &colorRow.G, &colorRow.B); err {
-	case sql.ErrNoRows:
-		return ColorRow{Found: false, Dist: 0, R: 0, G: 0, B: 0}
-	case nil:
-		colorRow.Found = true
-		return colorRow
-	default:
-		panic(err)
-	}
-}
-
-func getLum(c color.RGBA) int {
-	r, g, b, _ := c.RGBA()
-	red := float64(r >> 8)
-	green := float64(g >> 8)
-	blue := float64(b >> 8)
-	lum := int(math.Round((red * 0.3) + (green * 0.59) + (blue * 0.11)))
-	return lum
+func matchColor(srcColor color.RGBA) color.RGBA {
+	lum := getLum(uint16(srcColor.R)>>8, uint16(srcColor.G)>>8, uint16(srcColor.B)>>8)
+	closest := findClosest(lum)
+	col := getValue(closest)
+	return color.RGBA{col.R, col.G, col.B, 255}
 }
 
 func decodeImage(srcFile *os.File) image.Image {
@@ -351,169 +253,85 @@ func findAspectRatio(width int, height int) Aspect {
 
 // endregion draw
 
-// region db
-func prepDBFilesystem(cleanDB bool) {
-	homeFolder, err := homedir.Dir()
-	check(err, "Cannot detect homedir")
-	os.Chdir(homeFolder)
-	storagePath = path.Join(homeFolder, storageFolderName)
-	dbPath = path.Join(storagePath, dbFileName)
-	backupPath = path.Join(storagePath, backupDbFileName)
-	// check folder exists
-	if !exists(storagePath) {
-		fmt.Println("Creating storage dir:", storagePath)
-		mkdirErr := os.Mkdir(storageFolderName, 0755)
-		check(mkdirErr, "Cannot create storage dir")
-	}
-	// check db file exists
-	if cleanDB {
-		removeDB()
-		if exists(backupPath) {
-			delete(backupPath)
+// region data
+func getLum(r uint16, g uint16, b uint16) int {
+	return int(math.Round((float64(r) * 0.3) + (float64(g) * 0.59) + (float64(b) * 0.11)))
+}
+
+func makeColor(r uint8, g uint8, b uint8) RGBColor {
+	return RGBColor{R: r, G: g, B: b}
+}
+
+func lumExists(lum int) bool {
+	for i := 0; i < len(keys); i++ {
+		if keys[i] == lum {
+			return true
 		}
 	}
-	if !exists(dbPath) {
-		touch(dbPath)
+	return false
+}
+
+func findClosest(lum int) int {
+	closest := 999.99
+	var val int
+	for i := 0; i < len(keys); i++ {
+		dist := math.Abs(float64(keys[i]) - float64(lum))
+		if keys[i] == lum {
+			return lum
+		}
+		if dist < closest {
+			closest = dist
+			val = keys[i]
+		}
 	}
+	return val
 }
 
-func createTable() {
-	fmt.Println("Creating fresh colors table…")
-	statement1, _ := db.Prepare("DROP TABLE IF EXISTS colors")
-	statement1.Exec()
-	statement1.Close()
-	statement2, _ := db.Prepare(`CREATE TABLE colors(
-	r UNSIGNED TINYINT NOT NULL,
-	g UNSIGNED TINYINT NOT NULL,
-	b UNSIGNED TINYINT NOT NULL,
-	lum UNSIGED TINYINT GENERATED ALWAYS AS (ROUND((r * 0.3) + (g * 0.59) + (b * 0.11), 0)) STORED,
-	PRIMARY KEY(r, g, b)
-)`)
-	statement2.Exec()
-	statement2.Close()
-	statement3, _ := db.Prepare("CREATE INDEX color_lum ON colors(lum)")
-	statement3.Exec()
-	statement3.Close()
+func removeKey(lum int) {
+	keyLen := len(keys)
+	k := make([]int, 0)
+	for i := 0; i < keyLen; i++ {
+		if keys[i] != lum {
+			k = append(k, keys[i])
+		}
+	}
+	keys = k
 }
 
-// TODO zip backup before save
-func createBackup() {
-	fmt.Println("Creating DB backup", backupPath, "…")
-	in := open(dbPath)
-	defer in.Close()
-	out := touch(backupPath)
-	defer out.Close()
-	_, err := io.Copy(out, in)
-	check(err, "Error copying DB File to Backup")
+func getValue(lum int) RGBColor {
+	colorLen := len(data[lum])
+	val := data[lum][0]
+	if colorLen == 1 {
+		delete(data, lum)
+		removeKey(lum)
+	} else {
+		data[lum] = data[lum][1:]
+	}
+	return val
 }
 
-// TODO unzip backup before copy
-func createDbFromBackup() {
-	fmt.Println("Creating DB from backup…")
-	in := open(backupPath)
-	defer in.Close()
-	out := touch(dbPath)
-	defer out.Close()
-	_, err := io.Copy(out, in)
-	check(err, "Error copying Backup File to DB")
-}
-
-func fillTable() {
-	fmt.Println("Filling colors table…")
-	deleteStmt, _ := db.Prepare("DELETE FROM colors")
-	deleteStmt.Exec()
-	deleteStmt.Close()
+func generateData() {
+	data = make(map[int][]RGBColor)
 	var red uint16
-	var blue uint16
 	var green uint16
-	var vals []string
-	var valArgs []interface{}
-	total := 0
-	dot := ""
-	formattedTotal := ""
-	now := time.Now()
-	start := now.Unix()
-	fmt.Println("Generating 16,777,216 unique colors…")
-	for red = 0; red < 256; red++ {
-		for green = 0; green < 256; green++ {
-			vals = make([]string, 0, 256)
-			valArgs = make([]interface{}, 0, 256*3)
-			for blue = 0; blue < 256; blue++ {
-				vals = append(vals, "(?, ?, ?)")
-				valArgs = append(valArgs, red)
-				valArgs = append(valArgs, green)
-				valArgs = append(valArgs, blue)
-				total++
-				if total > 1 && total%1000000 == 0 {
-					dot = dot + "."
-					formattedTotal = fmt.Sprintf("%10v", p.Sprintf("%d", total))
-					fmt.Printf("%s colors made %s\n", formattedTotal, dot)
-				}
+	var blue uint16
+	var lum int
+	for red = 0; red <= 255; red++ {
+		for green = 0; green <= 255; green++ {
+			for blue = 0; blue <= 255; blue++ {
+				lum = getLum(red, green, blue)
+				data[lum] = append(data[lum], makeColor(uint8(red), uint8(green), uint8(blue)))
 			}
-			insertStmt := fmt.Sprintf("INSERT INTO colors (r, g, b) VALUES %s", strings.Join(vals, ","))
-			_, err := db.Exec(insertStmt, valArgs...)
-			check(err, "Error inserting into db")
 		}
 	}
-	fmt.Printf("%08d colors made in %d seconds\n", total, time.Now().Unix()-start)
+
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
 }
 
-func doesTableExist() bool {
-	var name string
-	row := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='colors'")
-	switch err := row.Scan(&name); err {
-	case sql.ErrNoRows:
-		return false
-	case nil:
-		return true
-	default:
-		panic(err)
-	}
-}
-
-func isTableFull() bool {
-	var count int64
-	row := db.QueryRow("SELECT COUNT(*) AS count FROM colors")
-	switch err := row.Scan(&count); err {
-	case sql.ErrNoRows:
-		return false
-	case nil:
-		return count == totalColors
-	default:
-		panic(err)
-	}
-}
-
-func buildDB(cleanDB bool) {
-	fmt.Println("Running <db>…")
-	prepDBFilesystem(cleanDB)
-	db, _ = sql.Open("sqlite3", dbPath)
-	backupExists := exists(backupPath)
-	if !doesTableExist() {
-		if backupExists {
-			createDbFromBackup()
-		} else {
-			createTable()
-		}
-	}
-	if !isTableFull() {
-		if backupExists {
-			createDbFromBackup()
-		} else {
-			fillTable()
-			createBackup()
-		}
-	}
-	fmt.Println("DB ready…")
-}
-
-func removeDB() {
-	if exists(dbPath) {
-		delete(dbPath)
-	}
-}
-
-// endregion db
+// endregion data
 
 // region main
 func main() {
@@ -533,15 +351,6 @@ func main() {
 		command = args[0]
 	}
 	switch command {
-	case "db":
-		dbArgs := args[1:]
-		cleanDB := false
-		if len(dbArgs) == 1 && (dbArgs[0] == "clean" || dbArgs[0] == "force") {
-			cleanDB = true
-		}
-		buildDB(cleanDB)
-		defer db.Close()
-		os.Exit(0)
 	case "draw":
 		drawArgs := args[1:]
 		if len(drawArgs) == 1 {
@@ -553,14 +362,14 @@ func main() {
 		srcFile := open(drawArgs[0])
 		destFileName = drawArgs[1]
 		destFile := touch(drawArgs[1] + ".part")
-		gridSize := 0
+		spread := 0
 		align := Center
 		if len(drawArgs) > 2 {
-			gridSizeVal, gridSizeErr := strconv.ParseUint(drawArgs[2], 10, 8)
-			if gridSizeErr != nil || gridSizeVal > 3 {
-				panic("Invalid gridSize value")
+			spreadVal, spreadErr := strconv.ParseUint(drawArgs[2], 10, 8)
+			if spreadErr != nil || spreadVal > 3 {
+				panic("Invalid spread value")
 			}
-			gridSize = int(gridSizeVal) + 1
+			spread = int(spreadVal) + 1
 			if len(drawArgs) > 3 {
 				alignVal, alignErr := strconv.ParseInt(drawArgs[3], 10, 8)
 				if alignErr != nil || alignVal > 1 || alignVal < -1 {
@@ -576,10 +385,8 @@ func main() {
 				}
 			}
 		}
-		buildDB(false)
-		drawImage(db, srcFile, destFile, gridSize, align)
-		removeDB()
-		defer db.Close()
+		generateData()
+		drawImage(srcFile, destFile, spread, align)
 	default:
 		printHelpMenu()
 	}
@@ -597,28 +404,21 @@ func printHelpMenu() {
 Commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 help: print help menu
-db:   prepare database
 draw: draw image
-
-    <db> arguments
-    ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
-    path: path to save database (default: ~/.allrgb)
-
     <draw> arguments
     ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
     sourceFile: source file to draw image from
     outputFile: file name of output
-	  gridSize:  px to skip, allows better color allocation across entire image (default 0)
+    spread:  px to skip, allows better color allocation across entire image (default 0)
 	    valid values are 0, 1, 2, 3 & generate corresponding px grids of 1, 4, 9, 16
     align:  optional alignment if dimensions don't match after resize (default 0)
-	   -1: align with start (left or top)
-		  0: align in center
-		  1: alight with end (right or bottom)
+      -1: align with start (left or top)
+      0: align in center
+	  1: alight with end (right or bottom)
 
 Examples
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ./allrgb help
-./allrgb db ~/.mydb
 ./allrgb draw input/file.png output/file.png 3 0`)
 }
 
