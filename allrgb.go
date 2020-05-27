@@ -185,7 +185,7 @@ func setColor(srcImage *image.RGBA, destImage *image.RGBA, x int, y int) {
 }
 
 func matchColor(srcColor color.RGBA) color.RGBA {
-	lum := getLum(uint16(srcColor.R)>>8, uint16(srcColor.G)>>8, uint16(srcColor.B)>>8)
+	lum := getLum(uint16(srcColor.R), uint16(srcColor.G), uint16(srcColor.B))
 	closest := findClosest(lum)
 	col := getValue(closest)
 	return color.RGBA{col.R, col.G, col.B, 255}
