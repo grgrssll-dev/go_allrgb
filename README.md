@@ -9,7 +9,7 @@ Generates an ALLRGB image by taking a source image and converting the pixels to 
 ### Commands
 `help` print help menu
 
-`draw` draw image (will prepare db if needed)
+`draw` draw image
 
 #### \<draw> arguments
 * `sourceFile` source file to draw image from
@@ -20,6 +20,8 @@ Generates an ALLRGB image by taking a source image and converting the pixels to 
    -1: align with start (left or top)
 	0: align in center
 	1: alight with end (right or bottom)
+* `shuffle` default 0
+	  set to 1 to shuffle colors before use (reduces banding, but makes more grey)
 
 ### Build
 $`go build allrgb.go`
@@ -30,3 +32,5 @@ $`./allrgb help`
 $`./allrgb draw input/file.png output/file.png 1 -1` 2x2 px spread, align to start if not correct aspect ratio
 
 $`./allrgb draw input/file.png output/file.png 3 0` 16x16 px spread, align center if not correct aspect ratio
+
+$`./allrgb draw input/file.png output/file.png 3 0 1` adds shuffle param
