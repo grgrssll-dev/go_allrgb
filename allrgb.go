@@ -178,8 +178,8 @@ func drawImage(db *sql.DB, srcFile *os.File, destFile *os.File, gridSize int, al
 
 func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, gridSize int) {
 	var vacStart int64
-	passComplete := "************** Pass %d of %d completed (time elapsed: %d) **************\n"
-	rowComplete := "row %d of %d completed for pass %d\n"
+	passComplete := "\n************** Pass %d of %d completed (time elapsed: %d) **************\n"
+	rowComplete := "\nrow %d of %d completed for pass %d\n"
 	vacuumingMsg := "Vacuuming completed in %d seconds\n"
 	start := time.Now().Unix()
 	width := destImage.Bounds().Max.X
@@ -198,11 +198,13 @@ func convertImage(db *sql.DB, srcImage *image.RGBA, destImage *image.RGBA, gridS
 		rows := int(math.Floor(float64(height-yOffset) / float64(gridSize)))
 		fmt.Println("xoff:", xOffset, "yoff:", yOffset, "gridSize:", gridSize, "pass:", pass)
 		for y = yOffset; y < height; y += gridSize {
+			i = 0
 			for x = xOffset; x < width; x += gridSize {
 				setColor(db, srcImage, destImage, x, y)
+				fmt.Print(".")
 				if px == vacuumFreq {
 					vacStart = time.Now().Unix()
-					fmt.Println("#### VACUUMING DB ####")
+					fmt.Println("\n#### VACUUMING DB ####")
 					vacStmt, _ := db.Prepare("VACUUM")
 					vacStmt.Exec()
 					vacStmt.Close()
