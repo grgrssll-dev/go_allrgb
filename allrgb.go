@@ -1,8 +1,5 @@
 package main
 
-// TODO compress backup file
-// Check on Closing stmt after use (in code but does it work?)
-
 import (
 	"fmt"
 	"github.com/nfnt/resize"
@@ -135,14 +132,6 @@ func drawImage(srcFile *os.File, destFile *os.File, spread int, align Alignment)
 	startPoint := getStartingPoint(srcWidth, srcHeight, destWidth, destHeight, align)
 	sRect := image.Rect(startPoint.X, startPoint.Y, startPoint.X+newWidth, startPoint.Y+newHeight)
 	draw.Draw(sImage, sRect, srcResizedImage, image.ZP, draw.Src)
-
-	// debugFileName, _ := homedir.Expand("~/Desktop/Debug.png")
-	// fmt.Println("-- Saving debug File", debugFileName)
-	// debugFile := touch(debugFileName)
-	// debugFile.Seek(0, 0)
-	// png.Encode(debugFile, sImage)
-	// debugFile.Close()
-
 	fmt.Println("ready to convert")
 	convertImage(sImage, destImage, int(spread))
 	fmt.Println("encoding")
@@ -166,7 +155,7 @@ func convertImage(srcImage *image.RGBA, destImage *image.RGBA, spread int) {
 	for pass < passCount {
 		xOffset = xOffsets[spread-1][pass]
 		yOffset = yOffsets[spread-1][pass]
-		fmt.Println("xoff:", xOffset, "yoff:", yOffset, "spread:", spread, "pass:", pass)
+		// fmt.Println("xoff:", xOffset, "yoff:", yOffset, "spread:", spread, "pass:", pass)
 		for y = yOffset; y < height; y += spread {
 			for x = xOffset; x < width; x += spread {
 				setColor(srcImage, destImage, x, y)
@@ -214,8 +203,6 @@ func decodeImage(srcFile *os.File) image.Image {
 }
 
 func getStartingPoint(srcWidth, srcHeight, destWidth, destHeight int, align Alignment) image.Point {
-	// fmt.Println("srcWidth:", srcWidth, "srcHeight:", srcHeight)
-	// fmt.Println("destWidth:", destWidth, "destHeight:", destHeight)
 	startPoint := image.Point{0, 0}
 	if srcHeight > destHeight {
 		heightDiff := srcHeight - destHeight
