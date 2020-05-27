@@ -12,6 +12,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"math"
+	"math/rand"
 	"os"
 	"sort"
 	"strconv"
@@ -296,7 +297,7 @@ func getValue(lum int) RGBColor {
 	return val
 }
 
-func generateData() {
+func generateData(shuffle bool) {
 	data = make(map[int][]RGBColor)
 	var red uint16
 	var green uint16
@@ -313,6 +314,12 @@ func generateData() {
 
 	for k := range data {
 		keys = append(keys, k)
+		if shuffle {
+			rand.Seed(time.Now().UnixNano())
+			rand.Shuffle(len(data[k]), func(i, j int) {
+				data[k][i], data[k][j] = data[k][j], data[k][i]
+			})
+		}
 	}
 	sort.Ints(keys)
 }
@@ -350,6 +357,7 @@ func main() {
 		destFile := touch(drawArgs[1] + ".part")
 		spread := 0
 		align := Center
+		shuffle := false
 		if len(drawArgs) > 2 {
 			spreadVal, spreadErr := strconv.ParseUint(drawArgs[2], 10, 8)
 			if spreadErr != nil || spreadVal > 3 {
@@ -370,8 +378,11 @@ func main() {
 					align = End
 				}
 			}
+			if len(drawArgs) > 4 {
+				shuffle = drawArgs[4] == "1"
+			}
 		}
-		generateData()
+		generateData(shuffle)
 		drawImage(srcFile, destFile, spread, align)
 	default:
 		printHelpMenu()
@@ -401,11 +412,14 @@ draw: draw image
       -1: align with start (left or top)
       0: align in center
 	  1: alight with end (right or bottom)
+	shuffle: default 0
+		set to 1 to shuffle colors before use (reduces banding, but makes more grey)
 
 Examples
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ./allrgb help
-./allrgb draw input/file.png output/file.png 3 0`)
+./allrgb draw input/file.png output/file.png 2 0
+./allrgb draw input/file.png output/file.png 3 0 1`)
 }
 
 //endregion help
